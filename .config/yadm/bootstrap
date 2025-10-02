@@ -1,0 +1,46 @@
+#!/bin/sh
+
+# Add apt repos
+# helm
+curl -fsSL https://baltocdn.com/helm/signing.asc | sudo gpg --dearmor -o /usr/share/keyrings/helm.gpg
+echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+
+# Ensure apt is up to date
+sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
+
+~/.local/bin/homebrew_install.sh
+
+# Linux apt installs
+sudo apt install -y openjdk-17-jdk maven
+sudo apt install -y build-essential curl file git duf eza gh glab yadm bat direnv wget yamllint zoxide
+sudo apt install -y docker.io
+sudo apt install -y kubectl kubectx
+
+# Linux utility brew installs (only used when apt or other install not simple)
+brew install bottom
+brew install dust
+brew install starship
+
+# Install fzf from upstream (keeps newer features than distro package)
+if [ ! -d "$HOME/.fzf" ]; then
+	git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
+	"$HOME/.fzf/install" --all
+else
+	printf "fzf already installed in $HOME/.fzf\n"
+fi
+
+
+~/.local/bin/minconda_install.sh
+~/.local/bin/python_interps.sh
+# Linux brew spark fails (don't use it)
+~/.local/bin/spark_install.sh
+~/.local/bin/gcloud_install_init.sh
+~/.local/bin/ollama_install.sh
+
+# Initial configs
+git config --global core.excludesfile ~/.config/git/ignore
+
+# Windows installs
+powershell.exe -ExecutionPolicy Bypass -File $(wslpath -w ~/.local/bin/vscode_install.ps1)
+powershell.exe -ExecutionPolicy Bypass -File $(wslpath -w ~/.local/bin/nerd_fonts_install.ps1)
+powershell.exe -ExecutionPolicy Bypass -File $(wslpath -w ~/.local/bin/docker_install.ps1)

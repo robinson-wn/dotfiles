@@ -1,0 +1,2 @@
+& ([scriptblock]::Create((iwr 'https://to.loredo.me/Install-NerdFont.ps1'))) -Name ubuntu, ubuntu-mono, ubuntu-sans -Confirm:$false
+& ([scriptblock]::Create((iwr 'https://to.loredo.me/Install-NerdFont.ps1'))) -Name hack, heavy-data -Confirm:$false 
