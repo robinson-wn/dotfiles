@@ -2,7 +2,8 @@
 
 add_newline = false
 command_timeout = 1000
-format = """$os$username$hostname$kubernetes$conda$directory$git_branch$git_status"""
+format = """$os$username$hostname$kubernetes$conda$directory$git_branch """
+#format = """$os$username$hostname$kubernetes$conda$directory$git_branch$git_status"""
 
 # Drop ugly default prompt characters
 [character]
@@ -44,7 +45,7 @@ truncation_symbol = '…/'
 home_symbol = '󰋜 ~'
 read_only_style = '197'
 read_only = ' '
-format = '[$path]($test)[$read_only]($read_only_style) '
+format = '[$path]($test)[$read_only]($read_only_style)'
 
 # Shows current git branch
 [git_branch]
@@ -72,8 +73,12 @@ deleted = '[󰍶 deleted=${count}](red)'
 
 # Shows kubernetes context and namespace
 [kubernetes]
-format = '[󱃾$context\($namespace\)](dimmed purple)'
 disabled = false
+# Context + character only if non-empty, namespace always
+format = '([󱃾$context]($style))[$namespace]($style)'
+style = "dimmed purple"
+context_aliases = { "docker-desktop" = "" }
+
 
 [conda]
 symbol = "🅒"

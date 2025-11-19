@@ -21,5 +21,5 @@ conda create -n $PYTHON_INTERP python=3.12 \
 conda activate $PYTHON_INTERP
 
 # Ensure consistent with Spark install version
-pip install pyspark==3.5.6
+pip install pyspark==$SPARK_VERSION graphframes
 pip install google-cloud-bigquery

@@ -11,7 +11,7 @@ echo "Starting Apache Spark installation on WSL..."
 # choose the pre-built package for your desired Hadoop version.
 # Update the variables below accordingly.
 
-SPARK_VERSION="spark-3.5.6" # Example: spark-4.0.0
+SPARK_VERSION="spark-4.0.1" # Example: spark-3.5.6, spark-4.0.1
 HADOOP_VERSION="hadoop3"    # Example: hadoop3 or hadoop3.3
 
 SPARK_TGZ="${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz"
@@ -103,16 +103,44 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# TODO: use orginal directory name and then symlink to /opt/spark
-# Rename the extracted directory to a simpler name (e.g., /opt/spark)
+# Keep the extracted directory with its original name and create/update a
+# symbolic link at /opt/spark that points to it. This preserves the original
+# versioned directory (e.g., /opt/spark-4.0.1-bin-hadoop3) while providing a
+# stable path at /opt/spark.
 EXTRACTED_DIR_NAME=$(basename "$SPARK_TGZ" .tgz)
-if [ -d "${INSTALL_DIR}/${EXTRACTED_DIR_NAME}" ]; then
-    sudo mv "${INSTALL_DIR}/${EXTRACTED_DIR_NAME}" "${INSTALL_DIR}/spark"
-    SPARK_HOME_PATH="${INSTALL_DIR}/spark"
-    echo "Spark moved to: ${SPARK_HOME_PATH}"
+EXTRACTED_PATH="${INSTALL_DIR}/${EXTRACTED_DIR_NAME}"
+
+if [ -d "$EXTRACTED_PATH" ]; then
+    echo "Found extracted Spark directory: ${EXTRACTED_PATH}"
+    # Prepare symlink target
+    SYMLINK_PATH="${INSTALL_DIR}/spark"
+
+    # If the symlink already exists and points to the same location, do nothing
+    if [ -L "$SYMLINK_PATH" ]; then
+        CURRENT_TARGET=$(readlink -f "$SYMLINK_PATH")
+        if [ "$CURRENT_TARGET" = "$EXTRACTED_PATH" ]; then
+            echo "Symlink ${SYMLINK_PATH} already points to ${EXTRACTED_PATH}."
+            SPARK_HOME_PATH="$SYMLINK_PATH"
+        else
+            echo "Updating existing symlink ${SYMLINK_PATH} to point to ${EXTRACTED_PATH}"
+            sudo ln -sfn "$EXTRACTED_PATH" "$SYMLINK_PATH"
+            SPARK_HOME_PATH="$SYMLINK_PATH"
+        fi
+    else
+        # If there is a non-symlink file/dir at /opt/spark, back it up
+        if [ -e "$SYMLINK_PATH" ]; then
+            BACKUP_PATH="${SYMLINK_PATH}-backup-$(date +%Y%m%d%H%M%S)"
+            echo "Backing up existing ${SYMLINK_PATH} to ${BACKUP_PATH}"
+            sudo mv "$SYMLINK_PATH" "$BACKUP_PATH"
+        fi
+        echo "Creating symlink ${SYMLINK_PATH} -> ${EXTRACTED_PATH}"
+        sudo ln -s "$EXTRACTED_PATH" "$SYMLINK_PATH"
+        SPARK_HOME_PATH="$SYMLINK_PATH"
+    fi
+    echo "Spark available at: ${EXTRACTED_PATH} (symlink: ${SPARK_HOME_PATH})"
 else
-    echo "Error: Extracted Spark directory not found. Manual intervention might be needed."
-    SPARK_HOME_PATH="${INSTALL_DIR}/${EXTRACTED_DIR_NAME}" # Fallback
+    echo "Error: Extracted Spark directory not found at ${EXTRACTED_PATH}. Manual intervention might be needed."
+    SPARK_HOME_PATH="$EXTRACTED_PATH" # Fallback
 fi
 
 # Remove temporary download files
