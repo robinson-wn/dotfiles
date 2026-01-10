@@ -79,6 +79,10 @@ format = '([󱃾$context]($style))[$namespace]($style)'
 style = "dimmed purple"
 context_aliases = { "docker-desktop" = "" }
 
+# Replace when 2.0 
+# [contexts.docker-desktop]
+# context_alias = ""
+
 
 [conda]
 symbol = "🅒"
