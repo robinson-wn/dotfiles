@@ -25,9 +25,9 @@ fi
 # --- Tool Initializations ---
 # Wrap evals in 'command -v' checks to prevent "command not found" errors
 # if a tool is temporarily uninstalled or the PATH changes.
-(( $+commands[starship] )) && eval "$(starship init zsh)"
-(( $+commands[direnv] ))   && eval "$(direnv hook zsh)"
-(( $+commands[zoxide] ))   && eval "$(zoxide init zsh)"
+(( ${+commands[starship]} )) && eval "$(starship init zsh)"
+(( ${+commands[direnv]} ))   && eval "$(direnv hook zsh)"
+(( ${+commands[zoxide]} ))   && eval "$(zoxide init zsh)"
 
 # --- History & FZF ---
 HISTFILE="$HOME/.zsh_history"
