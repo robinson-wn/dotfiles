@@ -1,26 +1,49 @@
 #!/bin/bash
 
-# This script automates the installation and initialization of the Google Cloud CLI
-# on a Debian-based Linux distribution (like Ubuntu, which is common in WSL).
+# Exit on error, undefined vars, and pipe failures
+set -euo pipefail
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
+# --- 1. Idempotency Check ---
+if command -v gcloud >/dev/null 2>&1; then
+    echo "Google Cloud CLI is already installed. Skipping installation."
+else
+    echo "Google Cloud CLI not found. Starting installation..."
 
-# --- Step 1: Add the Google Cloud CLI Distribution URI to the package list. ---
-echo "Adding Google Cloud CLI repository to sources.list..."
-echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list > /dev/null
+    # Ensure prerequisites exist
+    sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
 
-# --- Step 2: Import the Google Cloud public key. ---
-echo "Importing Google Cloud public key..."
-curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+    # --- 2. Add GPG Key safely ---
+    # Only download if the keyring doesn't exist
+    if [ ! -f /usr/share/keyrings/cloud.google.gpg ]; then
+        echo "Importing Google Cloud public key..."
+        curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+            sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+    fi
 
-# --- Step 3: Update the package list and install the gcloud CLI. ---
-echo "Updating package list and installing google-cloud-cli..."
-sudo apt-get update && sudo apt-get install google-cloud-cli -y
+    # --- 3. Add Repository safely ---
+    # Only add if the list file doesn't exist
+    if [ ! -f /etc/apt/sources.list.d/google-cloud-sdk.list ]; then
+        echo "Adding Google Cloud CLI repository..."
+        echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+            sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list > /dev/null
+    fi
 
-# --- Step 4: Initialize the gcloud CLI. ---
-echo "Installation complete. Initializing the gcloud CLI..."
-echo "This will open a browser window for authentication."
-gcloud init
+    # --- 4. Install ---
+    sudo apt-get update && sudo apt-get install -y google-cloud-cli
+fi
 
-echo "Script finished. You are now ready to use gcloud."
+# --- 5. Conditional Initialization ---
+# Checking for a configuration directory prevents gcloud init from running 
+# every single time you run the bootstrap script.
+if [ ! -d "$HOME/.config/gcloud" ]; then
+    read -p "GCloud is installed but not configured. Run 'gcloud init' now? (y/N): " response < /dev/tty
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        gcloud init
+    else
+        echo "Skipping initialization. You can run 'gcloud init' later."
+    fi
+else
+    echo "GCloud configuration found at ~/.config/gcloud."
+fi
+
+echo "Google Cloud CLI setup process complete."
