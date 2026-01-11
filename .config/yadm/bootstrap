@@ -1,75 +1,107 @@
 #!/bin/bash
 
-# Add apt repos
-# helm
+# --- 1. Boilerplate & Safety ---
+set -e          # Exit immediately if a command fails
+set -u          # Treat unset variables as an error
+set -o pipefail # Return exit code of the last command in a pipe that failed
+
+# Ensure we have sudo early
+echo "Requesting administrative privileges..."
+sudo -v
+while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+
+# --- 2. OS Check ---
+if [ ! -f /etc/debian_version ]; then
+    echo "Error: This bootstrap script is tailored for Debian/Ubuntu."
+    exit 1
+fi
+
+# --- 3. Repositories & Updates ---
+echo "--- Updating Package Sources ---"
 if [ ! -f /usr/share/keyrings/helm.gpg ]; then
-    curl -fsSL https://baltocdn.com/helm/signing.asc | sudo gpg --dearmor -o /usr/share/keyrings/helm.gpg
+    curl -fsSL --fail https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
     echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
 fi
 
-# Ensure apt is up to date
 sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
 
-bash ~/.local/bin/homebrew_install.sh
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+# --- 4. Homebrew ---
+if ! command -v brew >/dev/null; then
+    if [ -f "$HOME/.local/bin/homebrew_install.sh" ]; then
+        bash "$HOME/.local/bin/homebrew_install.sh"
+        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    fi
+fi
 
-# Linux apt installs
-sudo apt install -y openjdk-17-jdk openjdk-21-jdk maven
-sudo apt install -y zsh
+# --- 5. Package Installations ---
+echo "--- Installing APT Packages ---"
+sudo apt install -y \
+    openjdk-17-jdk openjdk-21-jdk maven \
+    zsh build-essential btop curl file git duf eza \
+    gh glab yadm bat direnv wget yamllint zoxide \
+    kubectl kubectx
+
+# --- 6. Interactive Java Selection ---
+echo "--- Configuring Java Version ---"
+# This will open the interactive menu for the user to choose their preferred JDK
 sudo update-alternatives --config java
-sudo apt install -y build-essential btop curl file git duf eza gh glab yadm bat direnv wget yamllint zoxide
-sudo apt install -y docker.io
-sudo apt install -y kubectl kubectx
 
-# Linux utility brew installs (only used when apt or other install not simple)
+echo "--- Installing Brew Packages ---"
 if command -v brew >/dev/null; then
     brew install bottom dust starship
 fi
 
-# Install fzf from upstream (keeps newer features than distro package)
+# --- 7. Tool-Specific Installs ---
 if [ ! -d "$HOME/.fzf" ]; then
-	git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
-	"$HOME/.fzf/install" --no-update-rc
-else
-	printf "fzf already installed in $HOME/.fzf\n"
+    git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
+    "$HOME/.fzf/install" --no-update-rc --no-bash --no-fish
 fi
 
 run_opt_script() {
-    local script_path=$1
-    local script_name=$2
-    read -p "Do you want to run $script_name? (y/N): " response
-    if [[ "$response" =~ ^[Yy]$ ]]; then
-        bash "$script_path"
+    local script_path="$1"
+    local script_name="$2"
+    if [ -f "$script_path" ]; then
+        read -p "Do you want to run $script_name? (y/N): " response < /dev/tty
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            bash "$script_path"
+        fi
+    else
+        echo "Warning: Script $script_path not found. Skipping $script_name."
     fi
 }
 
-bash ~/.local/bin/minconda_install.sh
-bash ~/.local/bin/python_interps.sh
+for script in minconda_install.sh python_interps.sh ollama_install.sh nerd_fonts_install.sh; do
+    [[ -f "$HOME/.local/bin/$script" ]] && bash "$HOME/.local/bin/$script"
+done
 
-# Linux brew spark fails (don't use it)
 run_opt_script "$HOME/.local/bin/spark_install.sh" "Spark"
 run_opt_script "$HOME/.local/bin/gcloud_install_init.sh" "Google Cloud"
 
-bash ~/.local/bin/ollama_install.sh
+# --- 8. Windows Interop (VS Code & Docker) ---
+if command -v cmd.exe >/dev/null; then
+    echo "--- Checking Windows Installs via winget ---"
+    if ! cmd.exe /c "winget list --id Microsoft.VisualStudioCode" >/dev/null 2>&1; then
+        cmd.exe /c "winget install --id Microsoft.VisualStudioCode --silent --accept-package-agreements --accept-source-agreements"
+    fi
 
-# Initial configs
-git config --global core.excludesfile ~/.config/git/ignore
-
-# Windows installs
-PS_PATH="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-# Verify Interop is enabled in the kernel
-if [ -x "$PS_PATH" ] && grep -q "enabled" /proc/sys/fs/binfmt_misc/status 2>/dev/null; then
-    echo "Running Windows-side installers..."
-
-    # We use local variables to ensure wslpath succeeds before passing to PowerShell
-    VS_CODE_WIN=$(wslpath -w "$HOME/.local/bin/vscode_install.ps1")
-    NERD_WIN=$(wslpath -w "$HOME/.local/bin/nerd_fonts_install.ps1")
-    DOCKER_WIN=$(wslpath -w "$HOME/.local/bin/docker_install.ps1")
-
-    "$PS_PATH" -ExecutionPolicy Bypass -File "$VS_CODE_WIN"
-    "$PS_PATH" -ExecutionPolicy Bypass -File "$NERD_WIN"
-    "$PS_PATH" -ExecutionPolicy Bypass -File "$DOCKER_WIN"
-else
-    echo "Skipping Windows installs: PowerShell not found or Interop disabled."
-    echo "Hint: Check /proc/sys/fs/binfmt_misc/status"
+    if ! cmd.exe /c "where docker" >/dev/null 2>&1; then
+        cmd.exe /c "winget install --id Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements --wait"
+    fi
 fi
+
+# --- 9. Final Configs & Shell Switch ---
+git config --global core.excludesfile "$HOME/.config/git/ignore"
+
+# Switch default shell to zsh if it isn't already
+CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
+ZSH_PATH=$(command -v zsh)
+
+if [ "$CURRENT_SHELL" != "$ZSH_PATH" ]; then
+    echo "Changing your default shell to zsh..."
+    sudo chsh -s "$ZSH_PATH" "$USER"
+fi
+
+echo "--------------------------------------------------"
+echo "Bootstrap complete!"
+echo "Please RESTART your terminal (or log out and back in) to use ZSH."
+echo "--------------------------------------------------"
