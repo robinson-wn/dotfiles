@@ -4,6 +4,7 @@ conda create -n $PYTHON_INTERP python=3.12 \
   scikit-learn \
   pyspark \
   matplotlib \
+  notebook \
   seaborn \
   jupyterlab \
   ipython \
@@ -16,7 +17,8 @@ conda create -n $PYTHON_INTERP python=3.12 \
   pytest \
   pyflakes \
   colorama \
-  jsonschema
+  jsonschema \
+  wget
 
 conda activate $PYTHON_INTERP
 

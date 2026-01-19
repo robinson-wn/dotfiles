@@ -19,8 +19,11 @@ fi
 # --- 3. Repositories & Updates ---
 echo "--- Updating Package Sources ---"
 if [ ! -f /usr/share/keyrings/helm.gpg ]; then
-    curl -fsSL --fail https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
-    echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+    if curl -fsSL --fail --max-time 10 https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null 2>&1; then
+        echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list > /dev/null
+    else
+        echo "Warning: Failed to add Helm repository. Continuing without it."
+    fi
 fi
 
 sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
@@ -39,12 +42,17 @@ sudo apt install -y \
     openjdk-17-jdk openjdk-21-jdk maven \
     zsh build-essential btop curl file git duf eza \
     gh glab yadm bat direnv wget yamllint zoxide \
-    kubectl kubectx
+    kubectl kubectx \
+    libsecret-1-dev lsb-release
 
 # --- 6. Interactive Java Selection ---
 echo "--- Configuring Java Version ---"
-# This will open the interactive menu for the user to choose their preferred JDK
-sudo update-alternatives --config java
+if command -v update-alternatives >/dev/null && sudo update-alternatives --list java >/dev/null 2>&1; then
+    read -p "Configure default Java version? (y/N): " response < /dev/tty
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        sudo update-alternatives --config java
+    fi
+fi
 
 echo "--- Installing Brew Packages ---"
 if command -v brew >/dev/null; then
@@ -53,8 +61,11 @@ fi
 
 # --- 7. Tool-Specific Installs ---
 if [ ! -d "$HOME/.fzf" ]; then
-    git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf"
-    "$HOME/.fzf/install" --no-update-rc --no-bash --no-fish
+    if git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf" 2>/dev/null; then
+        "$HOME/.fzf/install" --no-update-rc --no-bash --no-fish --no-zsh 2>/dev/null || true
+    else
+        echo "Warning: Failed to clone fzf repository. Continuing without it."
+    fi
 fi
 
 run_opt_script() {
@@ -63,42 +74,63 @@ run_opt_script() {
     if [ -f "$script_path" ]; then
         read -p "Do you want to run $script_name? (y/N): " response < /dev/tty
         if [[ "$response" =~ ^[Yy]$ ]]; then
-            bash "$script_path"
+            if command -v zsh >/dev/null; then
+                zsh "$script_path" || echo "Warning: $script_name encountered errors."
+            else
+                bash "$script_path" || echo "Warning: $script_name encountered errors."
+            fi
         fi
     else
         echo "Warning: Script $script_path not found. Skipping $script_name."
     fi
 }
 
+echo "--- Installing Optional Tools ---"
 for script in minconda_install.sh python_interps.sh ollama_install.sh nerd_fonts_install.sh; do
-    [[ -f "$HOME/.local/bin/$script" ]] && bash "$HOME/.local/bin/$script"
+    if [ -f "$HOME/.local/bin/$script" ]; then
+        if command -v zsh >/dev/null; then
+            zsh "$HOME/.local/bin/$script" || echo "Warning: $script encountered errors."
+        else
+            bash "$HOME/.local/bin/$script" || echo "Warning: $script encountered errors."
+        fi
+    fi
 done
 
 run_opt_script "$HOME/.local/bin/spark_install.sh" "Spark"
 run_opt_script "$HOME/.local/bin/gcloud_install_init.sh" "Google Cloud"
 
 # --- 8. Windows Interop (VS Code & Docker) ---
-if command -v cmd.exe >/dev/null; then
-    echo "--- Checking Windows Installs via winget ---"
+if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
+    echo "--- Detected WSL: Checking Windows Installs via winget ---"
     if ! cmd.exe /c "winget list --id Microsoft.VisualStudioCode" >/dev/null 2>&1; then
-        cmd.exe /c "winget install --id Microsoft.VisualStudioCode --silent --accept-package-agreements --accept-source-agreements"
+        cmd.exe /c "winget install --id Microsoft.VisualStudioCode --silent --accept-package-agreements --accept-source-agreements" || echo "Warning: VS Code installation via winget failed."
     fi
 
     if ! cmd.exe /c "where docker" >/dev/null 2>&1; then
-        cmd.exe /c "winget install --id Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements --wait"
+        cmd.exe /c "winget install --id Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements --wait" || echo "Warning: Docker Desktop installation via winget failed."
     fi
 fi
 
 # --- 9. Final Configs & Shell Switch ---
-git config --global core.excludesfile "$HOME/.config/git/ignore"
+git config --global core.excludesfile "$HOME/.config/git/ignore" || echo "Warning: Failed to set git config."
 
 # Switch default shell to zsh if it isn't already
-CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
-ZSH_PATH=$(command -v zsh)
-
-if [ "$CURRENT_SHELL" != "$ZSH_PATH" ]; then
-    echo "Changing your default shell to zsh..."
-    sudo chsh -s "$ZSH_PATH" "$USER"
+if command -v zsh >/dev/null; then
+    CURRENT_SHELL=$(getent passwd "$USER" | cut -d: -f7)
+    ZSH_PATH=$(command -v zsh)
+    
+    if [ "$CURRENT_SHELL" != "$ZSH_PATH" ]; then
+        echo "Changing your default shell to zsh..."
+        if sudo chsh -s "$ZSH_PATH" "$USER"; then
+            echo "Shell successfully changed to zsh."
+        else
+            echo "Warning: Failed to change shell. You may need to run 'chsh -s \$(which zsh)' manually."
+        fi
+    else
+        echo "Default shell is already set to zsh."
+    fi
+else
+    echo "Warning: zsh not found. Please install it manually before continuing."
 fi
 
 echo "--------------------------------------------------"
