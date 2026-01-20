@@ -63,15 +63,47 @@ sudo apt install -y \
 
 # --- 5. Install tools from GitHub releases ---
 echo "--- Installing CLI tools from GitHub releases ---"
-for tool in zoxide starship dust; do
+install_from_github() {
+    local tool=$1
+    local repo=$2
+    local asset_pattern=$3
+    
     if ! command -v "$tool" >/dev/null 2>&1; then
-        case "$tool" in
-            zoxide) curl -fsSL https://github.com/ajeetdsouza/zoxide/releases/download/0.9.0/zoxide-0.9.0-x86_64-unknown-linux-musl.tar.gz | sudo tar xz -C /usr/local/bin/ && echo "Installed zoxide" || echo "Warning: Failed to install zoxide" ;;
-            starship) curl -fsSL https://github.com/starship/starship/releases/download/v1.17.1/starship-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin/ && echo "Installed starship" || echo "Warning: Failed to install starship" ;;
-            dust) curl -fsSL https://github.com/bootandy/dust/releases/download/v0.8.6/dust-v0.8.6-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin/ && echo "Installed dust" || echo "Warning: Failed to install dust" ;;
-        esac
+        echo "Installing $tool from GitHub..."
+        
+        # Get latest release download URL
+        local download_url=$(curl -s "https://api.github.com/repos/$repo/releases/latest" | \
+            grep -o '"browser_download_url": "[^"]*"' | \
+            grep "$asset_pattern" | \
+            head -1 | cut -d'"' -f4)
+        
+        if [ -z "$download_url" ]; then
+            echo "Warning: Could not find download URL for $tool. Trying apt fallback..."
+            if sudo apt install -y "$tool" 2>/dev/null; then
+                echo "Installed $tool via apt"
+            else
+                echo "Warning: Failed to install $tool via apt as well"
+            fi
+            return
+        fi
+        
+        # Download and install
+        if curl -fsSL --max-time 30 "$download_url" | tar xz -C /usr/local/bin/ 2>/dev/null; then
+            echo "Installed $tool"
+        else
+            echo "Warning: Failed to install $tool from GitHub. Trying apt fallback..."
+            if sudo apt install -y "$tool" 2>/dev/null; then
+                echo "Installed $tool via apt"
+            else
+                echo "Warning: Failed to install $tool via apt as well"
+            fi
+        fi
     fi
-done
+}
+
+install_from_github "zoxide" "ajeetdsouza/zoxide" "x86_64-unknown-linux-musl"
+install_from_github "starship" "starship/starship" "x86_64-unknown-linux-gnu"
+install_from_github "dust" "bootandy/dust" "x86_64-unknown-linux-gnu"
 
 echo "--- Configuring Java Version ---"
 if command -v update-alternatives >/dev/null && sudo update-alternatives --list java >/dev/null 2>&1; then
