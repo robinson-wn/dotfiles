@@ -129,7 +129,30 @@ if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
     fi
 
     if ! cmd.exe /c "where docker" >/dev/null 2>&1; then
-        cmd.exe /c "winget install --id Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements --wait" || echo "Warning: Docker Desktop installation via winget failed."
+        read -p "Do you want to install Docker Desktop? (y/N): " response < /dev/tty
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            echo "Installing Docker Desktop..."
+            if cmd.exe /c "winget install --id Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements --wait"; then
+                echo ""
+                echo "=== Docker Desktop Installation Complete ==="
+                echo "IMPORTANT: Manual steps required for Docker to work:"
+                echo "  1. RESTART Windows (required for Docker to function)"
+                echo "  2. After restart, launch Docker Desktop from Start Menu"
+                echo "  3. Accept the Docker service agreement"
+                echo "  4. Wait for Docker to fully start (whale icon in system tray)"
+                echo "  5. Enable WSL 2 integration:"
+                echo "     - Open Docker Desktop Settings"
+                echo "     - Go to General > Enable 'Use the WSL 2 based engine'"
+                echo "     - Go to Resources > WSL Integration"
+                echo "     - Enable integration for your WSL distributions"
+                echo "  6. Verify from WSL after setup: docker --version"
+                echo ""
+            else
+                echo "Warning: Docker Desktop installation via winget failed."
+            fi
+        else
+            echo "Skipping Docker Desktop installation."
+        fi
     fi
 fi
 

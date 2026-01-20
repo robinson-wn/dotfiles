@@ -1,7 +1,11 @@
 param()
 
-# Guard: run only on Windows
-if (-not $IsWindows) {
+# Guard: run only on Windows (compatible with both PowerShell 5.1 and Core)
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    if (-not $IsWindows) {
+        Write-Error "This script must be run on Windows." -ErrorAction Stop
+    }
+} elseif ([Environment]::OSVersion.Platform -eq 'Unix') {
     Write-Error "This script must be run on Windows." -ErrorAction Stop
 }
 
@@ -25,7 +29,7 @@ function Is-MobaXtermInstalled {
 }
 
 # Define URL for MobaXterm installer (Free Home Edition, 64-bit)
-$installerUrl = "https://download.mobatek.net/2308/MobaXterm_Portable_v25.2.zip"
+$installerUrl = "https://download.mobatek.net/2542023202410304/MobaXterm_Portable_v24.3.zip"
 
 # Choose install directory based on admin privileges
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] 'Administrator')
@@ -39,9 +43,9 @@ $installerZip = Join-Path $tempDir 'MobaXterm.zip'
 if (-not (Is-MobaXtermInstalled)) {
     Write-Host "MobaXterm not found. Installing to $installDir ..."
 
-    # Ensure TLS 1.2+
+    # Ensure TLS 1.2+ (Tls13 not available in PowerShell 5.1)
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     } catch { }
 
     # Create temp and install folders
