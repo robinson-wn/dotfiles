@@ -11,7 +11,7 @@ echo "Starting Apache Spark installation on WSL..."
 # choose the pre-built package for your desired Hadoop version.
 # Update the variables below accordingly.
 
-SPARK_VERSION="spark-4.0.1" # Example: spark-3.5.6, spark-4.0.1
+SPARK_VERSION="spark-4.1.1" # Example: spark-3.5.6, spark-4.1.1
 HADOOP_VERSION="hadoop3"    # Example: hadoop3 or hadoop3.3
 
 SPARK_TGZ="${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz"
