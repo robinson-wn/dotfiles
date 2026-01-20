@@ -26,26 +26,53 @@ if [ ! -f /usr/share/keyrings/helm.gpg ]; then
     fi
 fi
 
-sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
-
-# --- 4. Homebrew ---
-if ! command -v brew >/dev/null; then
-    if [ -f "$HOME/.local/bin/homebrew_install.sh" ]; then
-        bash "$HOME/.local/bin/homebrew_install.sh"
-        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+if [ ! -f /usr/share/keyrings/kubernetes-archive-keyring.gpg ]; then
+    if curl -fsSL --fail --max-time 10 https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor | sudo tee /usr/share/keyrings/kubernetes-archive-keyring.gpg > /dev/null 2>&1; then
+        echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list > /dev/null
+    else
+        echo "Warning: Failed to add Kubernetes repository. Continuing without it."
     fi
 fi
 
-# --- 5. Package Installations ---
+if [ ! -f /usr/share/keyrings/githubcli-archive-keyring.gpg ]; then
+    if curl -fsSL --fail --max-time 10 https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null 2>&1; then
+        echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+    else
+        echo "Warning: Failed to add GitHub CLI repository. Continuing without it."
+    fi
+fi
+
+if [ ! -f /usr/share/keyrings/gitlab-cli-archive-keyring.gpg ]; then
+    if curl -fsSL --fail --max-time 10 https://gitlab.com/gitlab-org/cli/-/raw/main/build/ubuntu/keyring.gpg.d/gitlab-cli-archive-keyring.gpg | sudo tee /usr/share/keyrings/gitlab-cli-archive-keyring.gpg > /dev/null 2>&1; then
+        echo "deb [signed-by=/usr/share/keyrings/gitlab-cli-archive-keyring.gpg] https://gitlab.com/gitlab-org/cli/-/releases/latest/downloads/apt stable main" | sudo tee /etc/apt/sources.list.d/gitlab-cli.list > /dev/null
+    else
+        echo "Warning: Failed to add GitLab CLI repository. Continuing without it."
+    fi
+fi
+
+sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
+
+# --- 4. Package Installations ---
 echo "--- Installing APT Packages ---"
 sudo apt install -y \
     openjdk-17-jdk openjdk-21-jdk maven \
     zsh build-essential btop curl file git duf eza \
-    gh glab yadm bat direnv wget yamllint zoxide \
+    gh glab yadm bat direnv wget yamllint \
     kubectl kubectx \
     libsecret-1-dev lsb-release
 
-# --- 6. Interactive Java Selection ---
+# --- 5. Install tools from GitHub releases ---
+echo "--- Installing CLI tools from GitHub releases ---"
+for tool in zoxide starship dust; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        case "$tool" in
+            zoxide) curl -fsSL https://github.com/ajeetdsouza/zoxide/releases/download/0.9.0/zoxide-0.9.0-x86_64-unknown-linux-musl.tar.gz | sudo tar xz -C /usr/local/bin/ && echo "Installed zoxide" || echo "Warning: Failed to install zoxide" ;;
+            starship) curl -fsSL https://github.com/starship/starship/releases/download/v1.17.1/starship-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin/ && echo "Installed starship" || echo "Warning: Failed to install starship" ;;
+            dust) curl -fsSL https://github.com/bootandy/dust/releases/download/v0.8.6/dust-v0.8.6-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin/ && echo "Installed dust" || echo "Warning: Failed to install dust" ;;
+        esac
+    fi
+done
+
 echo "--- Configuring Java Version ---"
 if command -v update-alternatives >/dev/null && sudo update-alternatives --list java >/dev/null 2>&1; then
     read -p "Configure default Java version? (y/N): " response < /dev/tty
@@ -54,12 +81,7 @@ if command -v update-alternatives >/dev/null && sudo update-alternatives --list 
     fi
 fi
 
-echo "--- Installing Brew Packages ---"
-if command -v brew >/dev/null; then
-    brew install bottom dust starship
-fi
-
-# --- 7. Tool-Specific Installs ---
+# --- 6. Tool-Specific Installs ---
 if [ ! -d "$HOME/.fzf" ]; then
     if git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf" 2>/dev/null; then
         "$HOME/.fzf/install" --no-update-rc --no-bash --no-fish --no-zsh 2>/dev/null || true
@@ -99,7 +121,7 @@ done
 run_opt_script "$HOME/.local/bin/spark_install.sh" "Spark"
 run_opt_script "$HOME/.local/bin/gcloud_install_init.sh" "Google Cloud"
 
-# --- 8. Windows Interop (VS Code & Docker) ---
+# --- 7. Windows Interop (VS Code & Docker) ---
 if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
     echo "--- Detected WSL: Checking Windows Installs via winget ---"
     if ! cmd.exe /c "winget list --id Microsoft.VisualStudioCode" >/dev/null 2>&1; then
@@ -111,7 +133,7 @@ if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
     fi
 fi
 
-# --- 9. Final Configs & Shell Switch ---
+# --- 8. Final Configs & Shell Switch ---
 git config --global core.excludesfile "$HOME/.config/git/ignore" || echo "Warning: Failed to set git config."
 
 # Switch default shell to zsh if it isn't already
