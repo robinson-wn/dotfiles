@@ -3,7 +3,6 @@
 add_newline = false
 command_timeout = 1000
 format = """$os$username$hostname$kubernetes$conda$directory$git_branch """
-#format = """$os$username$hostname$kubernetes$conda$directory$git_branch$git_status"""
 
 # Drop ugly default prompt characters
 [character]
