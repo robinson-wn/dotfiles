@@ -16,9 +16,21 @@ trap cleanup EXIT
 # Fetch checksum file for integrity verification
 release_root="https://github.com/ryanoasis/nerd-fonts/releases"
 release_url=$([[ "$FONT_VERSION" == "latest" ]] && echo "$release_root/latest/download" || echo "$release_root/download/$FONT_VERSION")
-CHECKSUM_FILE="$TMP_ROOT/SHA256SUMS"
-if ! curl -fLo "$CHECKSUM_FILE" "$release_url/SHA256SUMS"; then
-    echo "Could not download checksum file for release '$FONT_VERSION'. Aborting."
+
+# Nerd Fonts renamed the checksum asset to SHA-256.txt; fall back to older names
+CHECKSUM_CANDIDATES=("SHA-256.txt" "SHA256SUMS" "SHA256SUMS.md")
+CHECKSUM_FILE="$TMP_ROOT/nerd-fonts-checksums.txt"
+downloaded_checksum=""
+
+for asset in "${CHECKSUM_CANDIDATES[@]}"; do
+    if curl -fLsSo "$CHECKSUM_FILE" "$release_url/$asset"; then
+        downloaded_checksum="$asset"
+        break
+    fi
+done
+
+if [[ -z "$downloaded_checksum" ]]; then
+    echo "Could not download checksum file for release '$FONT_VERSION' (tried: ${CHECKSUM_CANDIDATES[*]}). Aborting."
     exit 1
 fi
 
@@ -58,11 +70,12 @@ for font in "${FONTS[@]}"; do
     tar -xf "$tmp" -C "$tmp_extract"
 
     # 3. Copy Mono fonts to Windows folder (no registry edits or COM calls)
-    if ! powershell.exe -Command "
-        $tmpExtract = '$(wslpath -w "$tmp_extract")';
-        $fontFolder = 'C:\\Users\\$WIN_USER\\AppData\\Local\\Microsoft\\Windows\\Fonts';
-        Get-ChildItem -Path (Join-Path $tmpExtract '*') -Include '*Mono*.ttf','*Mono*.otf' -Recurse |
-            Copy-Item -Destination $fontFolder -Force
+    if ! powershell.exe -NoLogo -NoProfile -Command "
+        Set-Location C:\\; 
+        \$tmpExtract = '$(wslpath -w "$tmp_extract")';
+        \$fontFolder = 'C:\\Users\\$WIN_USER\\AppData\\Local\\Microsoft\\Windows\\Fonts';
+        Get-ChildItem -Path (Join-Path \$tmpExtract '*') -Include '*Mono*.ttf','*Mono*.otf' -Recurse |
+            Copy-Item -Destination \$fontFolder -Force
     "; then
         echo "Failed to copy fonts for $font; skipping."
         rm -rf "$tmp" "$tmp_extract"
