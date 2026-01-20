@@ -1,7 +1,26 @@
 #!/bin/bash
 
-# Define the fonts we want
-FONTS=("Ubuntu" "UbuntuMono" "UbuntuSans" "Hack" "HeavyData")
+set -euo pipefail
+
+# Define the fonts we want (Mono variants only)
+FONTS=("UbuntuMono" "Hack" "HeavyData")
+
+# Use a specific release if FONT_VERSION is provided; otherwise use the latest.
+FONT_VERSION=${FONT_VERSION:-latest}
+
+# Prepare temp workspace and cleanup on exit
+TMP_ROOT=$(mktemp -d)
+cleanup() { rm -rf "$TMP_ROOT"; }
+trap cleanup EXIT
+
+# Fetch checksum file for integrity verification
+release_root="https://github.com/ryanoasis/nerd-fonts/releases"
+release_url=$([[ "$FONT_VERSION" == "latest" ]] && echo "$release_root/latest/download" || echo "$release_root/download/$FONT_VERSION")
+CHECKSUM_FILE="$TMP_ROOT/SHA256SUMS"
+if ! curl -fLo "$CHECKSUM_FILE" "$release_url/SHA256SUMS"; then
+    echo "Could not download checksum file for release '$FONT_VERSION'. Aborting."
+    exit 1
+fi
 
 # Create a temporary directory on the Windows side for the fonts
 WIN_USER=$(cmd.exe /c "echo %USERNAME%" | tr -d '\r')
@@ -10,13 +29,26 @@ mkdir -p "$WIN_FONT_DIR"
 
 for font in "${FONTS[@]}"; do
     echo "Processing $font..."
-    echo "Installing $font Nerd Font to Windows..."
-    tmp="/tmp/${font}.tar.xz"
-    tmp_extract="/tmp/${font}_extract"
+    tmp="$TMP_ROOT/${font}.tar.xz"
+    tmp_extract="$TMP_ROOT/${font}_extract"
 
     # 1. Download to a temp location
-    if ! curl -fLo "$tmp" "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${font}.tar.xz"; then
+    if ! curl -fLo "$tmp" "$release_url/${font}.tar.xz"; then
         echo "Failed to download ${font}, skipping."
+        rm -f "$tmp"
+        continue
+    fi
+
+    # 1b. Verify checksum
+    expected=$(grep -E " ${font}\.tar\.xz$" "$CHECKSUM_FILE" | awk '{print $1}' | head -n1 || true)
+    if [[ -z "$expected" ]]; then
+        echo "No checksum entry for ${font}.tar.xz in $CHECKSUM_FILE; skipping."
+        rm -f "$tmp"
+        continue
+    fi
+    actual=$(sha256sum "$tmp" | awk '{print $1}')
+    if [[ "$expected" != "$actual" ]]; then
+        echo "Checksum mismatch for ${font}.tar.xz; expected $expected got $actual. Skipping."
         rm -f "$tmp"
         continue
     fi
@@ -25,52 +57,19 @@ for font in "${FONTS[@]}"; do
     mkdir -p "$tmp_extract"
     tar -xf "$tmp" -C "$tmp_extract"
 
-    # 3. Copy fonts to Windows folder and register each one with its proper font name
-    powershell.exe -ExecutionPolicy Bypass -Command "
-        \$shell = New-Object -ComObject Shell.Application;
-        \$fontFolder = 'C:\\Users\\$WIN_USER\\AppData\\Local\\Microsoft\\Windows\\Fonts';
-        \$tmpExtract = '$(wslpath -w "$tmp_extract")';
-        \$registryPath = 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts';
-
-        Get-ChildItem -Path (Join-Path \$tmpExtract '*') -Include '*Mono*.ttf','*Mono*.otf' -Recurse | ForEach-Object {
-            \$fontFile = \$_.FullName;
-            \$fileName = \$_.Name;
-            \$destPath = Join-Path \$fontFolder \$fileName;
-
-            Copy-Item -Path \$fontFile -Destination \$destPath -Force;
-
-            \$folder = \$shell.Namespace(\$fontFolder);
-            \$fontItem = \$folder.ParseName(\$fileName);
-
-            if (\$fontItem) {
-                \$fontName = \$folder.GetDetailsOf(\$fontItem, 21);
-                if (-not \$fontName) { \$fontName = \$fileName -replace '\\.[^.]+\$', '' }
-
-                \$fontType = if (\$fileName -match '\\.otf\$') { 'OpenType' } else { 'TrueType' };
-                \$registryName = \"\$fontName (\$fontType)\";
-
-                if (-not (Get-ItemProperty -Path \$registryPath -Name \$registryName -ErrorAction SilentlyContinue)) {
-                    New-ItemProperty -Path \$registryPath -Name \$registryName -Value \$fileName -PropertyType String -Force | Out-Null;
-                    Write-Host \"Registered: \$registryName\";
-                }
-            }
-        }
-        
-        # Refresh font cache
-        Add-Type -TypeDefinition @'
-            using System;
-            using System.Runtime.InteropServices;
-            public class FontHelper {
-                [DllImport(\"gdi32.dll\")]
-                public static extern int AddFontResource(string lpFileName);
-                [DllImport(\"user32.dll\", CharSet = CharSet.Auto)]
-                public static extern int SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-            }
-'@;
-        [FontHelper]::SendMessage([IntPtr]0xFFFF, 0x001D, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null;
-    "
+    # 3. Copy Mono fonts to Windows folder (no registry edits or COM calls)
+    if ! powershell.exe -Command "
+        $tmpExtract = '$(wslpath -w "$tmp_extract")';
+        $fontFolder = 'C:\\Users\\$WIN_USER\\AppData\\Local\\Microsoft\\Windows\\Fonts';
+        Get-ChildItem -Path (Join-Path $tmpExtract '*') -Include '*Mono*.ttf','*Mono*.otf' -Recurse |
+            Copy-Item -Destination $fontFolder -Force
+    "; then
+        echo "Failed to copy fonts for $font; skipping."
+        rm -rf "$tmp" "$tmp_extract"
+        continue
+    fi
 
     rm -rf "$tmp" "$tmp_extract"
 done
 
-echo "Fonts installed. Please restart Windows Terminal."
+echo "Mono fonts copied. Log off/on Windows to refresh the font list."
