@@ -18,7 +18,7 @@ SPARK_TGZ="${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz"
 SPARK_DOWNLOAD_URL="https://downloads.apache.org/spark/${SPARK_VERSION}/${SPARK_TGZ}"
 INSTALL_DIR="/opt" # Recommended installation directory
 
-JAVA_VERSION="openjdk-11-jdk" # Recommended Java version for Spark 3.x+
+JAVA_VERSION="openjdk-17-jdk" # Recommended Java version for Spark 3.x+
 
 # --- Step 1: Install Java (JDK) ---
 echo -e "\n--- Step 1: Installing Java Development Kit ($JAVA_VERSION) ---"
@@ -61,9 +61,11 @@ fi
 # Determine JAVA_HOME path
 JAVA_HOME_PATH=$(update-alternatives --query java | grep -oP 'Current: \K.*(?=/bin/java)')
 if [ -z "$JAVA_HOME_PATH" ]; then
-    # Fallback for common OpenJDK paths
+    # Fallback for common OpenJDK paths - check 17 first, then 21, then default
     if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
         JAVA_HOME_PATH="/usr/lib/jvm/java-17-openjdk-amd64"
+    elif [ -d "/usr/lib/jvm/java-21-openjdk-amd64" ]; then
+        JAVA_HOME_PATH="/usr/lib/jvm/java-21-openjdk-amd64"
     elif [ -d "/usr/lib/jvm/default-java" ]; then
         JAVA_HOME_PATH="/usr/lib/jvm/default-java"
     else

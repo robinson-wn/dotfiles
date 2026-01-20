@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Exit on error, undefined vars, and pipe failures
+set -euo pipefail
+
 # --- 1. Variables ---
 CONDA_DIR="$HOME/miniconda3"
 INSTALLER_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
@@ -8,7 +11,8 @@ INSTALLER_PATH="/tmp/miniconda_installer.sh"
 # --- 2. Check for Prerequisites ---
 if ! command -v wget >/dev/null 2>&1; then
     echo "wget not found. Installing..."
-    sudo apt update && sudo apt install -y wget
+    sudo apt update || { echo "ERROR: Failed to update apt"; exit 1; }
+    sudo apt install -y wget || { echo "ERROR: Failed to install wget"; exit 1; }
 fi
 
 # --- 3. Idempotent Installation Logic ---

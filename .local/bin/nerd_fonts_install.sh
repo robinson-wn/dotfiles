@@ -19,6 +19,7 @@ for font in "${FONTS[@]}"; do
 
     echo "Installing $font Nerd Font to Windows..."
     tmp="/tmp/${font}.tar.xz"
+    tmp_extract="/tmp/${font}_extract"
 
     # 1. Download to a temp location
     if ! curl -fLo "$tmp" "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${font}.tar.xz"; then
@@ -27,22 +28,60 @@ for font in "${FONTS[@]}"; do
         continue
     fi
 
-    # 2. Extract directly into the Windows User Font folder
-    tar -xf "$tmp" -C "$WIN_FONT_DIR"
+    # 2. Extract to a temporary directory first
+    mkdir -p "$tmp_extract"
+    tar -xf "$tmp" -C "$tmp_extract"
 
-    # 3. Use PowerShell to register the font in the Windows Registry (so it shows up in settings)
-    # This specifically looks for .ttf and .otf files in that folder and registers them
+    # 3. Copy fonts to Windows folder and register each one with its proper font name
     powershell.exe -ExecutionPolicy Bypass -Command "
+        \$shell = New-Object -ComObject Shell.Application;
         \$fontFolder = 'C:\\Users\\$WIN_USER\\AppData\\Local\\Microsoft\\Windows\\Fonts';
-        Get-ChildItem -Path \$fontFolder -Include '*.ttf', '*.otf' | ForEach-Object {
-            \$registryPath = 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts';
-            \$name = \$_.Name + ' (TrueType)';
-            if (-not (Test-Path -Path \"\$registryPath\\\$name\")) {
-                New-ItemProperty -Path \$registryPath -Name \$name -Value \$_.Name -PropertyType String -Force
+        \$tmpExtract = '$(wslpath -w "$tmp_extract")';
+        \$registryPath = 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts';
+        
+        Get-ChildItem -Path \$tmpExtract -Include '*.ttf', '*.otf' -Recurse | ForEach-Object {
+            \$fontFile = \$_.FullName;
+            \$fileName = \$_.Name;
+            \$destPath = Join-Path \$fontFolder \$fileName;
+            
+            # Copy font file to Windows Fonts directory
+            Copy-Item -Path \$fontFile -Destination \$destPath -Force;
+            
+            # Get the proper font name from the font file
+            \$folder = \$shell.Namespace(\$fontFolder);
+            \$fontItem = \$folder.ParseName(\$fileName);
+            
+            if (\$fontItem) {
+                \$fontName = \$folder.GetDetailsOf(\$fontItem, 21);  # 21 is the font name property
+                if (-not \$fontName) { \$fontName = \$fileName -replace '\\.[^.]+\$', '' }
+                
+                # Determine font type
+                \$fontType = if (\$fileName -match '\\.otf\$') { 'OpenType' } else { 'TrueType' };
+                \$registryName = \"\$fontName (\$fontType)\";
+                
+                # Register in registry
+                if (-not (Get-ItemProperty -Path \$registryPath -Name \$registryName -ErrorAction SilentlyContinue)) {
+                    New-ItemProperty -Path \$registryPath -Name \$registryName -Value \$fileName -PropertyType String -Force | Out-Null;
+                    Write-Host \"Registered: \$registryName\";
+                }
             }
-        }"
+        }
+        
+        # Refresh font cache
+        Add-Type -TypeDefinition @'
+            using System;
+            using System.Runtime.InteropServices;
+            public class FontHelper {
+                [DllImport(\"gdi32.dll\")]
+                public static extern int AddFontResource(string lpFileName);
+                [DllImport(\"user32.dll\", CharSet = CharSet.Auto)]
+                public static extern int SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+            }
+'@;
+        [FontHelper]::SendMessage([IntPtr]0xFFFF, 0x001D, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null;
+    "
 
-    rm -f "$tmp"
+    rm -rf "$tmp" "$tmp_extract"
 done
 
 echo "Fonts installed. Please restart Windows Terminal."
