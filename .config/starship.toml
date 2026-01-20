@@ -13,11 +13,11 @@ error_symbol = ''
 # ---
 
 [os]
-format = '[$symbol](dimmed white) '   
+format = '[$symbol](dimmed white)'   
 disabled = false
 
 [os.symbols]
-Windows = ' '
+Windows = ''
 Arch = '󰣇'
 Ubuntu = ''
 Macos = '󰀵'
