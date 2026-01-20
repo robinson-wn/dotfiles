@@ -10,13 +10,6 @@ mkdir -p "$WIN_FONT_DIR"
 
 for font in "${FONTS[@]}"; do
     echo "Processing $font..."
-
-    # If any file in the Windows font folder contains the font name (case-insensitive), skip install
-    if find "$WIN_FONT_DIR" -maxdepth 1 -type f -iname "*${font}*" -print -quit | grep -q .; then
-        echo "$font appears already installed in $WIN_FONT_DIR — skipping."
-        continue
-    fi
-
     echo "Installing $font Nerd Font to Windows..."
     tmp="/tmp/${font}.tar.xz"
     tmp_extract="/tmp/${font}_extract"
@@ -38,28 +31,24 @@ for font in "${FONTS[@]}"; do
         \$fontFolder = 'C:\\Users\\$WIN_USER\\AppData\\Local\\Microsoft\\Windows\\Fonts';
         \$tmpExtract = '$(wslpath -w "$tmp_extract")';
         \$registryPath = 'HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts';
-        
-        Get-ChildItem -Path \$tmpExtract -Include '*.ttf', '*.otf' -Recurse | ForEach-Object {
+
+        Get-ChildItem -Path (Join-Path \$tmpExtract '*') -Include '*Mono*.ttf','*Mono*.otf' -Recurse | ForEach-Object {
             \$fontFile = \$_.FullName;
             \$fileName = \$_.Name;
             \$destPath = Join-Path \$fontFolder \$fileName;
-            
-            # Copy font file to Windows Fonts directory
+
             Copy-Item -Path \$fontFile -Destination \$destPath -Force;
-            
-            # Get the proper font name from the font file
+
             \$folder = \$shell.Namespace(\$fontFolder);
             \$fontItem = \$folder.ParseName(\$fileName);
-            
+
             if (\$fontItem) {
-                \$fontName = \$folder.GetDetailsOf(\$fontItem, 21);  # 21 is the font name property
+                \$fontName = \$folder.GetDetailsOf(\$fontItem, 21);
                 if (-not \$fontName) { \$fontName = \$fileName -replace '\\.[^.]+\$', '' }
-                
-                # Determine font type
+
                 \$fontType = if (\$fileName -match '\\.otf\$') { 'OpenType' } else { 'TrueType' };
                 \$registryName = \"\$fontName (\$fontType)\";
-                
-                # Register in registry
+
                 if (-not (Get-ItemProperty -Path \$registryPath -Name \$registryName -ErrorAction SilentlyContinue)) {
                     New-ItemProperty -Path \$registryPath -Name \$registryName -Value \$fileName -PropertyType String -Force | Out-Null;
                     Write-Host \"Registered: \$registryName\";
