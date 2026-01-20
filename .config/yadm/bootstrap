@@ -78,12 +78,20 @@ install_from_github() {
             head -1 | cut -d'"' -f4)
         
         if [ -z "$download_url" ]; then
-            echo "Warning: Could not find download URL for $tool. Trying apt fallback..."
+            echo "Warning: Could not find download URL for $tool with pattern '$asset_pattern'. Trying apt fallback..."
             if sudo apt install -y "$tool" 2>/dev/null; then
                 echo "Installed $tool via apt"
-            else
-                echo "Warning: Failed to install $tool via apt as well"
+                return
             fi
+            
+            # Try snap as final fallback
+            echo "Warning: apt package not found. Trying snap..."
+            if command -v snap >/dev/null && sudo snap install "$tool" 2>/dev/null; then
+                echo "Installed $tool via snap"
+                return
+            fi
+            
+            echo "Warning: Failed to install $tool via all methods"
             return
         fi
         
@@ -94,9 +102,17 @@ install_from_github() {
             echo "Warning: Failed to install $tool from GitHub. Trying apt fallback..."
             if sudo apt install -y "$tool" 2>/dev/null; then
                 echo "Installed $tool via apt"
-            else
-                echo "Warning: Failed to install $tool via apt as well"
+                return
             fi
+            
+            # Try snap as final fallback
+            echo "Warning: apt package not found. Trying snap..."
+            if command -v snap >/dev/null && sudo snap install "$tool" 2>/dev/null; then
+                echo "Installed $tool via snap"
+                return
+            fi
+            
+            echo "Warning: Failed to install $tool via all methods"
         fi
     fi
 }
