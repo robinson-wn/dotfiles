@@ -8,7 +8,8 @@ set -o pipefail # Return exit code of the last command in a pipe that failed
 # Ensure we have sudo early
 echo "Requesting administrative privileges..."
 sudo -v
-while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+SUDO_KEEPALIVE_PID=$(sudo bash -c 'while true; do sudo -n true; sleep 60; done' 2>/dev/null & echo $!)
+trap "kill $SUDO_KEEPALIVE_PID 2>/dev/null; exit" INT TERM EXIT
 
 # --- 2. OS Check ---
 if [ ! -f /etc/debian_version ]; then
@@ -19,7 +20,7 @@ fi
 # --- 3. Repositories & Updates ---
 echo "--- Updating Package Sources ---"
 if [ ! -f /usr/share/keyrings/helm.gpg ]; then
-    if curl -fsSL --fail --max-time 10 https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null 2>&1; then
+    if curl -fsSL --fail --max-time 30 https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null 2>&1; then
         echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list > /dev/null
     else
         echo "Warning: Failed to add Helm repository. Continuing without it."
@@ -27,7 +28,7 @@ if [ ! -f /usr/share/keyrings/helm.gpg ]; then
 fi
 
 if [ ! -f /usr/share/keyrings/kubernetes-archive-keyring.gpg ]; then
-    if curl -fsSL --fail --max-time 10 https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor | sudo tee /usr/share/keyrings/kubernetes-archive-keyring.gpg > /dev/null 2>&1; then
+    if curl -fsSL --fail --max-time 30 https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor | sudo tee /usr/share/keyrings/kubernetes-archive-keyring.gpg > /dev/null 2>&1; then
         echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list > /dev/null
     else
         echo "Warning: Failed to add Kubernetes repository. Continuing without it."
@@ -35,7 +36,7 @@ if [ ! -f /usr/share/keyrings/kubernetes-archive-keyring.gpg ]; then
 fi
 
 if [ ! -f /usr/share/keyrings/githubcli-archive-keyring.gpg ]; then
-    if curl -fsSL --fail --max-time 10 https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null 2>&1; then
+    if curl -fsSL --fail --max-time 30 https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /usr/share/keyrings/githubcli-archive-keyring.gpg > /dev/null 2>&1; then
         echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
     else
         echo "Warning: Failed to add GitHub CLI repository. Continuing without it."
@@ -43,10 +44,19 @@ if [ ! -f /usr/share/keyrings/githubcli-archive-keyring.gpg ]; then
 fi
 
 if [ ! -f /usr/share/keyrings/gitlab-cli-archive-keyring.gpg ]; then
-    if curl -fsSL --fail --max-time 10 https://gitlab.com/gitlab-org/cli/-/raw/main/build/ubuntu/keyring.gpg.d/gitlab-cli-archive-keyring.gpg | sudo tee /usr/share/keyrings/gitlab-cli-archive-keyring.gpg > /dev/null 2>&1; then
+    if curl -fsSL --fail --max-time 30 https://gitlab.com/gitlab-org/cli/-/raw/main/build/ubuntu/keyring.gpg.d/gitlab-cli-archive-keyring.gpg | sudo tee /usr/share/keyrings/gitlab-cli-archive-keyring.gpg > /dev/null 2>&1; then
         echo "deb [signed-by=/usr/share/keyrings/gitlab-cli-archive-keyring.gpg] https://gitlab.com/gitlab-org/cli/-/releases/latest/downloads/apt stable main" | sudo tee /etc/apt/sources.list.d/gitlab-cli.list > /dev/null
     else
         echo "Warning: Failed to add GitLab CLI repository. Continuing without it."
+    fi
+fi
+
+if ! grep -q "deb.*nodesource" /etc/apt/sources.list.d/* 2>/dev/null; then
+    echo "--- Adding NodeSource Repository for Node.js LTS ---"
+    if curl -fsSL --fail --max-time 60 https://deb.nodesource.com/setup_lts.x | sudo -E bash - > /dev/null 2>&1; then
+        echo "NodeSource repository added successfully"
+    else
+        echo "Warning: Failed to add NodeSource repository. Continuing without it."
     fi
 fi
 
@@ -54,12 +64,21 @@ sudo apt update && sudo apt upgrade -y && sudo apt autoremove -y
 
 # --- 4. Package Installations ---
 echo "--- Installing APT Packages ---"
+if ! command -v node >/dev/null 2>&1; then
+    echo "Installing Node.js LTS..."
+    sudo apt install -y nodejs
+else
+    NODE_VERSION=$(node -v)
+    echo "Node.js is already installed: $NODE_VERSION"
+fi
+
 sudo apt install -y \
     openjdk-17-jdk openjdk-21-jdk maven \
     zsh build-essential btop curl file git duf eza \
     gh glab yadm bat direnv wget yamllint \
     kubectl kubectx \
-    libsecret-1-dev lsb-release
+    libsecret-1-dev lsb-release \
+    ca-certificates gnupg
 
 # --- 5. Install tools from GitHub releases ---
 echo "--- Installing CLI tools from GitHub releases ---"
@@ -95,17 +114,41 @@ install_from_github() {
             return
         fi
         
-        # Download and install
-        if curl -fsSL --max-time 30 "$download_url" | tar xz -C /usr/local/bin/ 2>/dev/null; then
-            echo "Installed $tool"
+        # Download and install to temp directory
+        local temp_dir=$(mktemp -d)
+        if curl -fsSL --max-time 60 "$download_url" | tar xz -C "$temp_dir" 2>/dev/null; then
+            # Try to find and move the binary
+            if [ -f "$temp_dir/$tool" ]; then
+                sudo mv "$temp_dir/$tool" /usr/local/bin/ && echo "Installed $tool"
+            elif [ -f "$(find "$temp_dir" -name "$tool" -type f 2>/dev/null | head -1)\" ]; then
+                sudo mv $(find "$temp_dir" -name "$tool" -type f 2>/dev/null | head -1) /usr/local/bin/
+                sudo chmod +x /usr/local/bin/"$tool"
+                echo "Installed $tool"
+            else
+                echo "Warning: Could not locate $tool binary in extracted archive. Trying apt fallback..."
+                rm -rf "$temp_dir"
+                if sudo apt install -y "$tool" 2>/dev/null; then
+                    echo "Installed $tool via apt"
+                    return
+                fi
+                
+                echo "Warning: apt package not found. Trying snap..."
+                if command -v snap >/dev/null && sudo snap install "$tool" 2>/dev/null; then
+                    echo "Installed $tool via snap"
+                    return
+                fi
+                
+                echo "Warning: Failed to install $tool via all methods"
+                return
+            fi
         else
-            echo "Warning: Failed to install $tool from GitHub. Trying apt fallback..."
+            echo "Warning: Failed to download $tool from GitHub. Trying apt fallback..."
+            rm -rf "$temp_dir"
             if sudo apt install -y "$tool" 2>/dev/null; then
                 echo "Installed $tool via apt"
                 return
             fi
             
-            # Try snap as final fallback
             echo "Warning: apt package not found. Trying snap..."
             if command -v snap >/dev/null && sudo snap install "$tool" 2>/dev/null; then
                 echo "Installed $tool via snap"
@@ -114,6 +157,7 @@ install_from_github() {
             
             echo "Warning: Failed to install $tool via all methods"
         fi
+        rm -rf "$temp_dir"
     fi
 }
 
@@ -123,16 +167,20 @@ install_from_github "dust" "bootandy/dust" "x86_64-unknown-linux-gnu"
 
 echo "--- Configuring Java Version ---"
 if command -v update-alternatives >/dev/null && sudo update-alternatives --list java >/dev/null 2>&1; then
-    read -p "Configure default Java version? (y/N): " response < /dev/tty
-    if [[ "$response" =~ ^[Yy]$ ]]; then
-        sudo update-alternatives --config java
+    if [ -t 0 ]; then
+        read -p "Configure default Java version? (y/N): " response < /dev/tty
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            sudo update-alternatives --config java
+        fi
+    else
+        echo "Running non-interactively. Skipping Java version configuration."
     fi
 fi
 
 # --- 6. Tool-Specific Installs ---
 if [ ! -d "$HOME/.fzf" ]; then
     if git clone --depth 1 https://github.com/junegunn/fzf.git "$HOME/.fzf" 2>/dev/null; then
-        "$HOME/.fzf/install" --no-update-rc --no-bash --no-fish --no-zsh 2>/dev/null || true
+        "$HOME/.fzf/install" --no-update-rc --no-bash --no-fish --zsh 2>/dev/null || true
     else
         echo "Warning: Failed to clone fzf repository. Continuing without it."
     fi
@@ -156,7 +204,7 @@ run_opt_script() {
 }
 
 echo "--- Installing Optional Tools ---"
-for script in minconda_install.sh python_interps.sh ollama_install.sh nerd_fonts_install.sh; do
+for script in minconda_install.sh python_interps.sh nerd_fonts_install.sh; do
     if [ -f "$HOME/.local/bin/$script" ]; then
         if command -v zsh >/dev/null; then
             zsh "$HOME/.local/bin/$script" || echo "Warning: $script encountered errors."
@@ -166,40 +214,58 @@ for script in minconda_install.sh python_interps.sh ollama_install.sh nerd_fonts
     fi
 done
 
+run_opt_script "$HOME/.local/bin/ollama_install.sh" "Ollama"
+
 run_opt_script "$HOME/.local/bin/spark_install.sh" "Spark"
 run_opt_script "$HOME/.local/bin/gcloud_install_init.sh" "Google Cloud"
 
 # --- 7. Windows Interop (VS Code & Docker) ---
 if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
     echo "--- Detected WSL: Checking Windows Installs via winget ---"
-    if ! cmd.exe /c "winget list --id Microsoft.VisualStudioCode" >/dev/null 2>&1; then
-        cmd.exe /c "winget install --id Microsoft.VisualStudioCode --silent --accept-package-agreements --accept-source-agreements" || echo "Warning: VS Code installation via winget failed."
+    
+    # Check VS Code with better error handling
+    if command -v cmd.exe >/dev/null 2>&1; then
+        if ! cmd.exe /c "winget list --id Microsoft.VisualStudioCode" >/dev/null 2>&1; then
+            echo "Installing VS Code..."
+            cmd.exe /c "winget install --id Microsoft.VisualStudioCode --silent --accept-package-agreements --accept-source-agreements" || echo "Warning: VS Code installation via winget failed."
+        else
+            echo "VS Code is already installed."
+        fi
     fi
 
-    if ! cmd.exe /c "where docker" >/dev/null 2>&1; then
-        read -p "Do you want to install Docker Desktop? (y/N): " response < /dev/tty
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            echo "Installing Docker Desktop..."
-            if cmd.exe /c "winget install --id Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements --wait"; then
-                echo ""
-                echo "=== Docker Desktop Installation Complete ==="
-                echo "IMPORTANT: Manual steps required for Docker to work:"
-                echo "  1. RESTART Windows (required for Docker to function)"
-                echo "  2. After restart, launch Docker Desktop from Start Menu"
-                echo "  3. Accept the Docker service agreement"
-                echo "  4. Wait for Docker to fully start (whale icon in system tray)"
-                echo "  5. Enable WSL 2 integration:"
-                echo "     - Open Docker Desktop Settings"
-                echo "     - Go to General > Enable 'Use the WSL 2 based engine'"
-                echo "     - Go to Resources > WSL Integration"
-                echo "     - Enable integration for your WSL distributions"
-                echo "  6. Verify from WSL after setup: docker --version"
-                echo ""
+    # Check Docker with better error handling
+    if command -v cmd.exe >/dev/null 2>&1; then
+        if ! cmd.exe /c "where docker" >/dev/null 2>&1; then
+            if [ -t 0 ]; then
+                read -p "Do you want to install Docker Desktop? (y/N): " response < /dev/tty
+                if [[ "$response" =~ ^[Yy]$ ]]; then
+                    echo "Installing Docker Desktop..."
+                    if cmd.exe /c "winget install --id Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements --wait"; then
+                        echo ""
+                        echo "=== Docker Desktop Installation Complete ==="
+                        echo "IMPORTANT: Manual steps required for Docker to work:"
+                        echo "  1. RESTART Windows (required for Docker to function)"
+                        echo "  2. After restart, launch Docker Desktop from Start Menu"
+                        echo "  3. Accept the Docker service agreement"
+                        echo "  4. Wait for Docker to fully start (whale icon in system tray)"
+                        echo "  5. Enable WSL 2 integration:"
+                        echo "     - Open Docker Desktop Settings"
+                        echo "     - Go to General > Enable 'Use the WSL 2 based engine'"
+                        echo "     - Go to Resources > WSL Integration"
+                        echo "     - Enable integration for your WSL distributions"
+                        echo "  6. Verify from WSL after setup: docker --version"
+                        echo ""
+                    else
+                        echo "Warning: Docker Desktop installation via winget failed."
+                    fi
+                else
+                    echo "Skipping Docker Desktop installation."
+                fi
             else
-                echo "Warning: Docker Desktop installation via winget failed."
+                echo "Running non-interactively. Skipping Docker Desktop installation."
             fi
         else
-            echo "Skipping Docker Desktop installation."
+            echo "Docker is already installed."
         fi
     fi
 fi
@@ -229,4 +295,14 @@ fi
 echo "--------------------------------------------------"
 echo "Bootstrap complete!"
 echo "Please RESTART your terminal (or log out and back in) to use ZSH."
+echo ""
+echo "Note: Node.js LTS has been installed and is now in your PATH."
+echo "VS Code will automatically recognize the new Node.js installation."
+echo "If VS Code was already running, please restart it to ensure it uses the"
+echo "newly installed Node.js version."
 echo "--------------------------------------------------"
+
+# Cleanup sudo keepalive process
+if [ ! -z "${SUDO_KEEPALIVE_PID:-}" ]; then
+    kill $SUDO_KEEPALIVE_PID 2>/dev/null || true
+fi
