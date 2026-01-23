@@ -6,10 +6,11 @@ set -u          # Treat unset variables as an error
 set -o pipefail # Return exit code of the last command in a pipe that failed
 
 # Ensure we have sudo early
-echo "Requesting administrative privileges..."
-sudo -v
-SUDO_KEEPALIVE_PID=$(sudo bash -c 'while true; do sudo -n true; sleep 60; done' 2>/dev/null & echo $!)
-trap "kill $SUDO_KEEPALIVE_PID 2>/dev/null; exit" INT TERM EXIT
+echo "Requesting administrative privileges (30 second timeout)..."
+if ! timeout 30 sudo -v; then
+    echo "Error: Failed to get sudo privileges within 30 seconds. Exiting."
+    exit 1
+fi
 
 # --- 2. OS Check ---
 if [ ! -f /etc/debian_version ]; then
@@ -301,8 +302,3 @@ echo "VS Code will automatically recognize the new Node.js installation."
 echo "If VS Code was already running, please restart it to ensure it uses the"
 echo "newly installed Node.js version."
 echo "--------------------------------------------------"
-
-# Cleanup sudo keepalive process
-if [ ! -z "${SUDO_KEEPALIVE_PID:-}" ]; then
-    kill $SUDO_KEEPALIVE_PID 2>/dev/null || true
-fi
