@@ -6,11 +6,11 @@ set -u          # Treat unset variables as an error
 set -o pipefail # Return exit code of the last command in a pipe that failed
 
 # Ensure we have sudo early
-echo "Requesting administrative privileges (30 second timeout)..."
-if ! timeout 30 sudo -v; then
-    echo "Error: Failed to get sudo privileges within 30 seconds. Exiting."
-    exit 1
-fi
+# echo "Requesting administrative privileges (30 second timeout)..."
+# if ! timeout 30 sudo -v; then
+#     echo "Error: Failed to get sudo privileges within 30 seconds. Exiting."
+#     exit 1
+# fi
 
 # --- 2. OS Check ---
 if [ ! -f /etc/debian_version ]; then
