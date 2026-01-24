@@ -4,3 +4,7 @@ export SPARK_VERSION=4.1.1
 # Spark
 export SPARK_HOME=/opt/spark
 export PATH="$PATH:$SPARK_HOME/bin"
+
+# NVM (Node Version Manager)
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
