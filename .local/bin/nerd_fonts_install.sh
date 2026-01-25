@@ -5,6 +5,11 @@ set -euo pipefail
 # Define the fonts we want (Mono variants only)
 FONTS=("UbuntuMono" "Hack" "HeavyData")
 
+# Detect whether we can prompt
+is_interactive() {
+    [ -t 0 ]
+}
+
 # Use a specific release if FONT_VERSION is provided; otherwise use the latest.
 FONT_VERSION=${FONT_VERSION:-latest}
 
@@ -38,6 +43,29 @@ fi
 WIN_USER=$(cmd.exe /c "echo %USERNAME%" | tr -d '\r')
 WIN_FONT_DIR="/mnt/c/Users/$WIN_USER/AppData/Local/Microsoft/Windows/Fonts"
 mkdir -p "$WIN_FONT_DIR"
+
+normalize() { echo "$1" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]'; }
+
+# Skip unless fonts are missing or user explicitly agrees to overwrite
+missing_fonts=()
+for font in "${FONTS[@]}"; do
+    # Consider both Mono and non-Mono variants; case-insensitive match on base name
+    if ! find "$WIN_FONT_DIR" -maxdepth 1 -iregex ".*${font}.*\\.[ot]tf" -print -quit | grep -q .; then
+        missing_fonts+=("$font")
+    fi
+done
+
+if (( ${#missing_fonts[@]} == 0 )); then
+    if is_interactive; then
+        read -p "Fonts already present. Reinstall/overwrite? (y/N): " response < /dev/tty || response="N"
+        [[ "$response" =~ ^[Yy]$ ]] || { echo "Fonts already present; skipping install."; exit 0; }
+        echo "User confirmed reinstall; continuing."
+    else
+        echo "Fonts already present; non-interactive run so skipping install."; exit 0
+    fi
+else
+    echo "Missing fonts detected: ${missing_fonts[*]}. Proceeding with install."
+fi
 
 for font in "${FONTS[@]}"; do
     echo "Processing $font..."

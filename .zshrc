@@ -57,9 +57,9 @@ if [[ -d "$HOME/miniconda3" ]]; then
         eval "$__conda_setup"
     else
         if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-# . "$HOME/miniconda3/etc/profile.d/conda.sh"  # commented out by conda initialize
+            . "$HOME/miniconda3/etc/profile.d/conda.sh"
         else
-# export PATH="$HOME/miniconda3/bin:$PATH"  # commented out by conda initialize
+            export PATH="$HOME/miniconda3/bin:$PATH"
         fi
     fi
     unset __conda_setup
@@ -77,22 +77,6 @@ if (( $+commands[python] )); then
     export PYSPARK_PYTHON=$(command -v python)
     export PYSPARK_DRIVER_PYTHON=$(command -v python)
 fi
-
-# >>> conda initialize >>>
-# !! Contents within this block are managed by 'conda init' !!
-__conda_setup="$('/home/wnr/miniconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
-if [ $? -eq 0 ]; then
-    eval "$__conda_setup"
-else
-    if [ -f "/home/wnr/miniconda3/etc/profile.d/conda.sh" ]; then
-        . "/home/wnr/miniconda3/etc/profile.d/conda.sh"
-    else
-        export PATH="/home/wnr/miniconda3/bin:$PATH"
-    fi
-fi
-unset __conda_setup
-# <<< conda initialize <<<
-
 
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
