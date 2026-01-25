@@ -18,15 +18,27 @@ apt_install() {
     sudo apt install -y "$@"
 }
 
-apt_optional_install() {
-    local pkg
-    for pkg in "$@"; do
-        sudo apt install -y "$pkg" || true
-    done
-}
-
-install_dust() {
-    apt_install dust || apt_install du-dust || true
+install_fzf_latest() {
+    local fzf_version=$(curl -s https://api.github.com/repos/junegunn/fzf/releases/latest | grep -o '"tag_name": "[^"]*' | cut -d'"' -f4 | sed 's/v//')
+    local fzf_url="https://github.com/junegunn/fzf/releases/download/v${fzf_version}/fzf-${fzf_version}-linux_amd64.tar.gz"
+    
+    if [ -z "$fzf_version" ]; then
+        echo "Warning: Could not determine latest fzf version; skipping."
+        return 1
+    fi
+    
+    echo "Installing fzf v${fzf_version} from GitHub..."
+    if curl -fsSL "$fzf_url" | tar -xz -C /tmp && sudo mv /tmp/fzf /usr/local/bin/fzf; then
+        sudo chmod +x /usr/local/bin/fzf
+        # Remove any apt-installed fzf to avoid conflicts
+        sudo apt remove -y fzf >/dev/null 2>&1 || true
+        # Ensure /usr/local/bin is in PATH and takes precedence
+        echo "fzf installed: $(/usr/local/bin/fzf --version)"
+        return 0
+    else
+        echo "Warning: Failed to install fzf from GitHub; falling back to apt."
+        return 1
+    fi
 }
 
 ensure_snap() {
@@ -42,6 +54,21 @@ ensure_snap() {
     sudo snap install "$pkg" $flag || true
 }
 
+install_optional_tool() {
+    local pkg="$1"
+    local snap_pkg="${2:-$pkg}"
+    local classic="${3:-}"
+
+    # Try apt first
+    if sudo apt install -y "$pkg" 2>/dev/null; then
+        return 0
+    fi
+
+    # Fall back to snap if apt fails
+    echo "apt package '$pkg' not found; trying snap..."
+    ensure_snap "$snap_pkg" "$pkg" "$classic"
+}
+
 run_script() {
     local path="$1"
     local label="$2"
@@ -51,11 +78,24 @@ run_script() {
         return
     fi
 
-    if command -v zsh >/dev/null 2>&1; then
-        zsh "$path" || echo "Warning: $label encountered errors."
-    else
-        bash "$path" || echo "Warning: $label encountered errors."
-    fi
+    # Make executable if not already
+    [ -x "$path" ] || chmod +x "$path"
+    
+    # Execute directly to respect shebang
+    "$path" || echo "Warning: $label encountered errors."
+}
+
+update_zshenv() {
+    local var_name="$1"
+    local var_value="$2"
+    local zshenv="$HOME/.zshenv"
+    
+    [ ! -f "$zshenv" ] && touch "$zshenv"
+    
+    # Remove old definition if exists
+    sed -i "/^export ${var_name}=/d" "$zshenv"
+    # Add new definition
+    echo "export ${var_name}=${var_value}" >> "$zshenv"
 }
 
 maybe_run() {
@@ -145,6 +185,23 @@ maybe_configure_java() {
     else
         echo "Non-interactive: skipping Java version configuration."
     fi
+    
+    # Update .zshenv with the selected JAVA_HOME
+    local java_home=$(update-alternatives --query java 2>/dev/null | grep -oP 'Current: \K.*(?=/bin/java)' || true)
+    if [ -z "$java_home" ]; then
+        # Fallback detection
+        for path in /usr/lib/jvm/java-17-openjdk-amd64 /usr/lib/jvm/java-21-openjdk-amd64 /usr/lib/jvm/default-java; do
+            if [ -d "$path" ]; then
+                java_home="$path"
+                break
+            fi
+        done
+    fi
+    
+    if [ -n "$java_home" ]; then
+        echo "Setting JAVA_HOME=$java_home in ~/.zshenv"
+        update_zshenv "JAVA_HOME" "$java_home"
+    fi
 }
 
 ensure_winget_app() {
@@ -177,14 +234,17 @@ sudo apt autoremove -y
 
 # --- 5. Core Packages ---
 section "Installing base packages"
+echo "Note: Java 17 is recommended for Apache Spark compatibility."
 apt_install \
-    openjdk-17-jdk openjdk-21-jdk maven \
-    zsh build-essential btop curl file git duf eza fzf \
+    openjdk-17-jdk maven \
+    zsh build-essential btop curl file git duf eza \
     yadm bat direnv wget yamllint \
     libsecret-1-dev lsb-release \
     ca-certificates gnupg snapd
 
-# --- 6. Node.js (NVM-first) ---
+# --- 5b. Install fzf from latest GitHub release ---
+install_fzf_latest || apt_install fzf
+
 # --- 6. Node.js (NVM-first) ---
 section "Installing Node.js via NVM"
 install_nvm && ensure_node_via_nvm 22 || apt_node_fallback
@@ -192,23 +252,17 @@ install_nvm && ensure_node_via_nvm 22 || apt_node_fallback
 # --- 7. Java alternatives ---
 maybe_configure_java
 
-# --- 8. Optional packages (apt) ---
-section "Installing optional packages (apt)"
-optional_pkgs=(gh glab kubectl kubectx starship zoxide)
-apt_optional_install "${optional_pkgs[@]}"
-install_dust
+# --- 8. Optional packages (apt with snap fallback) ---
+section "Installing optional packages"
+install_optional_tool gh gh
+install_optional_tool glab glab
+install_optional_tool kubectl kubectl --classic
+install_optional_tool kubectx kubectx
+install_optional_tool starship starship
+install_optional_tool zoxide zoxide
+install_optional_tool dust dust
 
-# --- 9. Snap fallbacks ---
-section "Installing snap fallbacks"
-ensure_snap gh gh
-ensure_snap glab glab
-ensure_snap kubectl kubectl --classic
-ensure_snap kubectx kubectx
-ensure_snap starship starship
-ensure_snap zoxide zoxide
-ensure_snap dust dust || ensure_snap du-dust dust
-
-# --- 10. Tool-specific scripts ---
+# --- 9. Tool-specific scripts ---
 section "Running local setup scripts"
 required_scripts=(
     "$HOME/.local/bin/minconda_install.sh:Miniconda install"
