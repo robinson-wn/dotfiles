@@ -288,21 +288,10 @@ if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
 
     ensure_winget_app Microsoft.VisualStudioCode "VS Code"
     
-    # Starship installation (optional - antivirus may block automation)
-    echo "Starship prompt installer:"
+    # Configure Starship in PowerShell 5.1 profile
     if command -v powershell.exe >/dev/null 2>&1; then
-        if powershell.exe -NoProfile -Command 'Get-Command starship -ErrorAction SilentlyContinue' 2>/dev/null | grep -q starship; then
-            log "✓ Starship installed on Windows."
-        else
-            warn "Starship not found on Windows. Install via: scoop install starship"
-        fi
-    fi
-
-    # Configure Starship in PowerShell 5.1 profile (only if installed)
-    if command -v powershell.exe >/dev/null 2>&1; then
-        if powershell.exe -NoProfile -Command 'Get-Command starship -ErrorAction SilentlyContinue' 2>/dev/null | grep -q starship; then
-            echo "Configuring Starship for PowerShell 5.1..."
-            powershell.exe -NoProfile -Command '
+        echo "Configuring Starship for PowerShell 5.1..."
+        powershell.exe -NoProfile -Command '
                 # Enable script execution for CurrentUser
                 $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
                 if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "Undefined") {
@@ -335,14 +324,12 @@ if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
                     Write-Host "Starship already configured in PowerShell profile"
                 }
             ' || echo "Note: PowerShell 5.1 profile configuration failed (manual setup may be needed)."
-        fi
     fi
 
     # Configure Starship in PowerShell 7+ profile (if available)
     if command -v pwsh >/dev/null 2>&1; then
-        if pwsh -NoProfile -Command 'Get-Command starship -ErrorAction SilentlyContinue' 2>/dev/null | grep -q starship; then
-            echo "Configuring Starship for PowerShell 7+..."
-            pwsh -NoProfile -Command '
+        echo "Configuring Starship for PowerShell 7+..."
+        pwsh -NoProfile -Command '
                 # Enable script execution for CurrentUser
                 $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
                 if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "Undefined") {
@@ -374,7 +361,6 @@ if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
                     Write-Host "Starship already configured in PowerShell 7+ profile"
                 }
             ' || echo "Note: PowerShell 7+ profile configuration failed (manual setup may be needed)."
-        fi
     fi
 
     # Copy Starship config from WSL to Windows
