@@ -21,6 +21,25 @@ apt_install() {
     sudo apt install -y "$@"
 }
 
+install_fzf_from_github() {
+    local target="$HOME/.fzf"
+
+    # Update existing clone or fetch fresh
+    if [ -d "$target/.git" ]; then
+        git -C "$target" pull --ff-only || { warn "Failed to update fzf clone."; return 1; }
+    else
+        git clone --depth 1 https://github.com/junegunn/fzf.git "$target" || { warn "Failed to clone fzf."; return 1; }
+    fi
+
+    # Install bindings/completions without touching bash/fish rc files
+    if "$target/install" --all --no-bash --no-fish --no-update-rc; then
+        log "fzf installed from GitHub. Add shell sourcing if missing."
+    else
+        warn "fzf install script reported a failure."
+        return 1
+    fi
+}
+
 run_script() {
     local path="$1"
     local label="$2"
@@ -222,8 +241,12 @@ apt_install \
 
 # --- 6. Modern shell layer ---
 section "Installing modern shell tools"
-apt_install fzf yadm direnv
+apt_install yadm direnv
 install_starship || true
+
+# --- 6b. fzf (GitHub installer) ---
+section "Installing fzf from GitHub"
+install_fzf_from_github || true
 
 # --- 7. Java & build layer (SDKMAN!) ---
 section "Installing Java and Maven via SDKMAN"

@@ -1,11 +1,7 @@
 # Setup fzf
 # ---------
-if [[ ! "$PATH" == *"$HOME/.fzf/bin"* ]]; then
-  PATH="${PATH:+${PATH}:}$HOME/.fzf/bin"
+if [[ ! "$PATH" == */home/wnr/.fzf/bin* ]]; then
+  PATH="${PATH:+${PATH}:}/home/wnr/.fzf/bin"
 fi
 
-# Initialize fzf for zsh
-# Only run if fzf is found to prevent shell startup errors
-if command -v fzf >/dev/null 2>&1; then
-    source <(fzf --zsh)
-fi
+source <(fzf --zsh)
