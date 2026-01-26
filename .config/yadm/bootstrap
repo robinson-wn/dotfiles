@@ -56,6 +56,25 @@ run_script() {
     fi
 }
 
+run_powershell_script() {
+    local path="$1"
+    local label="$2"
+
+    if [ ! -f "$path" ]; then
+        log "Skipping $label (not found)."
+        return
+    fi
+
+    if ! command -v powershell.exe >/dev/null 2>&1; then
+        warn "PowerShell not available; skipping $label."
+        return
+    fi
+
+    local ps_path
+    ps_path=$(wslpath -w "$path")
+    powershell.exe -ExecutionPolicy Bypass -NoProfile -File "$ps_path" || warn "$label encountered errors."
+}
+
 maybe_run() {
     local path="$1"
     local label="$2"
@@ -74,8 +93,6 @@ maybe_run() {
 }
 
 export NVM_DIR="$HOME/.nvm"
-export SDKMAN_DIR="$HOME/.sdkman"
-export SDKMAN_NON_INTERACTIVE=true
 
 load_nvm() {
     # Clear any alias/function that could block nvm's own function definition
@@ -166,39 +183,6 @@ ensure_winget_app() {
     fi
 }
 
-ensure_sdkman() {
-    if [ "${SDKMAN_READY:-0}" = "1" ]; then
-        return 0
-    fi
-
-    if [ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]; then
-        . "$SDKMAN_DIR/bin/sdkman-init.sh"
-        SDKMAN_READY=1
-        return 0
-    fi
-
-    if curl -fsSL "https://get.sdkman.io" | bash 2>/dev/null; then
-        . "$SDKMAN_DIR/bin/sdkman-init.sh"
-        SDKMAN_READY=1
-        return 0
-    fi
-
-    warn "SDKMAN installation failed."
-    return 1
-}
-
-install_with_sdkman() {
-    local candidate="$1"
-    local version="$2"
-
-    if ! command -v sdk >/dev/null 2>&1; then
-        warn "SDKMAN is not available; skipping $candidate $version."
-        return 1
-    fi
-
-    sdk install "$candidate" "$version" || sdk install "$candidate" "$version"
-}
-
 install_starship() {
     if command -v starship >/dev/null 2>&1; then
         log "Starship already installed."
@@ -236,7 +220,7 @@ sudo apt autoremove -y
 # --- 5. System layer (apt) ---
 section "Installing system packages (apt layer)"
 apt_install \
-    zsh build-essential btop curl file git wget lsb-release \
+    zsh build-essential btop curl file git wget zip lsb-release \
     libsecret-1-dev ca-certificates gnupg
 
 # --- 6. Modern shell layer ---
@@ -248,16 +232,11 @@ install_starship || true
 section "Installing fzf from GitHub"
 install_fzf_from_github || true
 
-# --- 7. Java & build layer (SDKMAN!) ---
-section "Installing Java and Maven via SDKMAN"
-if ensure_sdkman; then
-    install_with_sdkman java "21-tem" && sdk default java 21-tem || true
-    install_with_sdkman java "17-tem" || true
-    install_with_sdkman maven "latest" || true
-    maybe_configure_java
-else
-    echo "Warning: SDKMAN not available; skipping Java/Maven installs."
-fi
+# --- 7. Java & build layer (System Java) ---
+section "Installing Java and Maven (system packages)"
+apt_install openjdk-17-jdk maven
+log "OpenJDK 17 and Maven installed via apt."
+maybe_configure_java
 
 # --- 8. Node.js (NVM-first) ---
 section "Installing Node.js via NVM"
@@ -277,10 +256,24 @@ optional_scripts=(
     "$HOME/.local/bin/gcloud_install_init.sh:Google Cloud SDK"
 )
 
+# Add Windows PowerShell scripts if in WSL/Windows environment
+if [ -d "/mnt/c/Windows" ] || command -v powershell.exe >/dev/null 2>&1; then
+    required_scripts+=(
+        "$HOME/.local/bin/starship_install_windows.ps1:Starship Windows installation"
+        "$HOME/.local/bin/mobaxterm_install.ps1:MobaXterm installation"
+    )
+fi
+
 for entry in "${required_scripts[@]}"; do
     path=${entry%%:*}
     label=${entry#*:}
-    run_script "$path" "$label"
+    
+    # Check if it's a PowerShell script
+    if [[ "$path" == *.ps1 ]]; then
+        run_powershell_script "$path" "$label"
+    else
+        run_script "$path" "$label"
+    fi
 done
 
 for entry in "${optional_scripts[@]}"; do
@@ -294,6 +287,118 @@ if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
     section "WSL: checking Windows installs via winget"
 
     ensure_winget_app Microsoft.VisualStudioCode "VS Code"
+    
+    # Starship installation (optional - antivirus may block automation)
+    echo "Starship prompt installer:"
+    if command -v powershell.exe >/dev/null 2>&1; then
+        if powershell.exe -NoProfile -Command 'Get-Command starship -ErrorAction SilentlyContinue' 2>/dev/null | grep -q starship; then
+            log "✓ Starship installed on Windows."
+        else
+            warn "Starship not found on Windows. Install via: scoop install starship"
+        fi
+    fi
+
+    # Configure Starship in PowerShell 5.1 profile (only if installed)
+    if command -v powershell.exe >/dev/null 2>&1; then
+        if powershell.exe -NoProfile -Command 'Get-Command starship -ErrorAction SilentlyContinue' 2>/dev/null | grep -q starship; then
+            echo "Configuring Starship for PowerShell 5.1..."
+            powershell.exe -NoProfile -Command '
+                # Enable script execution for CurrentUser
+                $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
+                if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "Undefined") {
+                    try {
+                        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+                        Write-Host "Set PowerShell execution policy to RemoteSigned for CurrentUser"
+                    } catch {
+                        Write-Host "Warning: Could not set execution policy. You may need to run this in an elevated PowerShell:"
+                        Write-Host "  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser"
+                    }
+                }
+                
+                $profilePath = $PROFILE.CurrentUserCurrentHost
+                Write-Host "PowerShell 5.1 profile path: $profilePath"
+                $profileDir = Split-Path -Parent $profilePath
+                if (-not (Test-Path $profileDir)) {
+                    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+                    Write-Host "Created profile directory: $profileDir"
+                }
+                if (-not (Test-Path $profilePath)) {
+                    New-Item -ItemType File -Path $profilePath -Force | Out-Null
+                    Write-Host "Created profile file at $profilePath"
+                }
+                $starshipInit = "Invoke-Expression (&starship init powershell)"
+                $content = if (Test-Path $profilePath) { Get-Content $profilePath -Raw } else { "" }
+                if ($content -notmatch "starship init") {
+                    Add-Content -Path $profilePath -Value "`n$starshipInit"
+                    Write-Host "Added Starship initialization to PowerShell profile"
+                } else {
+                    Write-Host "Starship already configured in PowerShell profile"
+                }
+            ' || echo "Note: PowerShell 5.1 profile configuration failed (manual setup may be needed)."
+        fi
+    fi
+
+    # Configure Starship in PowerShell 7+ profile (if available)
+    if command -v pwsh >/dev/null 2>&1; then
+        if pwsh -NoProfile -Command 'Get-Command starship -ErrorAction SilentlyContinue' 2>/dev/null | grep -q starship; then
+            echo "Configuring Starship for PowerShell 7+..."
+            pwsh -NoProfile -Command '
+                # Enable script execution for CurrentUser
+                $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
+                if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "Undefined") {
+                    try {
+                        Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+                        Write-Host "Set PowerShell execution policy to RemoteSigned for CurrentUser"
+                    } catch {
+                        Write-Host "Warning: Could not set execution policy for PowerShell 7+."
+                    }
+                }
+                
+                $profilePath = $PROFILE.CurrentUserCurrentHost
+                Write-Host "PowerShell 7+ profile path: $profilePath"
+                $profileDir = Split-Path -Parent $profilePath
+                if (-not (Test-Path $profileDir)) {
+                    New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
+                    Write-Host "Created profile directory: $profileDir"
+                }
+                if (-not (Test-Path $profilePath)) {
+                    New-Item -ItemType File -Path $profilePath -Force | Out-Null
+                    Write-Host "Created profile file at $profilePath"
+                }
+                $starshipInit = "Invoke-Expression (&starship init powershell)"
+                $content = if (Test-Path $profilePath) { Get-Content $profilePath -Raw } else { "" }
+                if ($content -notmatch "starship init") {
+                    Add-Content -Path $profilePath -Value "`n$starshipInit"
+                    Write-Host "Added Starship initialization to PowerShell 7+ profile"
+                } else {
+                    Write-Host "Starship already configured in PowerShell 7+ profile"
+                }
+            ' || echo "Note: PowerShell 7+ profile configuration failed (manual setup may be needed)."
+        fi
+    fi
+
+    # Copy Starship config from WSL to Windows
+    if [ -f "$HOME/.config/starship.toml" ]; then
+        echo "Copying Starship config from WSL to Windows..."
+        powershell.exe -NoProfile -Command "
+            \$wslConfigPath = \"\\\\wsl\\\$\\Ubuntu\\home\\\$env:USERNAME\\.config\\starship.toml\"
+            Write-Host \"WSL Starship config path: \$wslConfigPath\"
+            # Use \$env:APPDATA for standard Starship config location on Windows
+            \$windowsConfigDir = Join-Path \$env:APPDATA 'starship'
+            \$windowsConfigPath = Join-Path \$windowsConfigDir 'starship.toml'
+            
+            if (Test-Path \$wslConfigPath) {
+                if (-not (Test-Path \$windowsConfigDir)) {
+                    New-Item -ItemType Directory -Path \$windowsConfigDir -Force | Out-Null
+                    Write-Host \"Created Starship config directory: \$windowsConfigDir\"
+                }
+                Copy-Item -Path \$wslConfigPath -Destination \$windowsConfigPath -Force
+                Write-Host \"Copied Starship config to Windows: \$windowsConfigPath\"
+            } else {
+                Write-Host \"WSL Starship config not found at \$wslConfigPath\"
+            }
+        " || echo "Warning: Failed to copy Starship config to Windows."
+    fi
 
     if command -v cmd.exe >/dev/null 2>&1; then
         if ! cmd.exe /c "where docker" >/dev/null 2>&1; then

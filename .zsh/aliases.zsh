@@ -12,4 +12,3 @@ alias ll="eza --group-directories-first -l"
 alias tree="eza -T"
 alias rm="rm -i"
 alias bat="/usr/bin/batcat"
-
