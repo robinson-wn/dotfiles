@@ -6,8 +6,11 @@ set -u
 set -o pipefail
 
 # --- 2. Helpers ---
+log() { printf '%s\n' "$*"; }
+warn() { printf 'Warning: %s\n' "$*" >&2; }
+
 section() {
-    echo "=== $* ==="
+    log "=== $* ==="
 }
 
 is_interactive() {
@@ -18,43 +21,19 @@ apt_install() {
     sudo apt install -y "$@"
 }
 
-apt_optional_install() {
-    local pkg
-    for pkg in "$@"; do
-        sudo apt install -y "$pkg" || true
-    done
-}
-
-install_dust() {
-    apt_install dust || apt_install du-dust || true
-}
-
-ensure_snap() {
-    local pkg="$1"
-    local cmd="${2:-$pkg}"
-    local classic="${3:-}"
-
-    command -v snap >/dev/null 2>&1 || return
-    command -v "$cmd" >/dev/null 2>&1 && return
-
-    local flag=""
-    [ "$classic" = "--classic" ] && flag="--classic"
-    sudo snap install "$pkg" $flag || true
-}
-
 run_script() {
     local path="$1"
     local label="$2"
 
     if [ ! -f "$path" ]; then
-        echo "Skipping $label (not found)."
+        log "Skipping $label (not found)."
         return
     fi
 
     if command -v zsh >/dev/null 2>&1; then
-        zsh "$path" || echo "Warning: $label encountered errors."
+        zsh "$path" || warn "$label encountered errors."
     else
-        bash "$path" || echo "Warning: $label encountered errors."
+        bash "$path" || warn "$label encountered errors."
     fi
 }
 
@@ -76,6 +55,8 @@ maybe_run() {
 }
 
 export NVM_DIR="$HOME/.nvm"
+export SDKMAN_DIR="$HOME/.sdkman"
+export SDKMAN_NON_INTERACTIVE=true
 
 load_nvm() {
     # Clear any alias/function that could block nvm's own function definition
@@ -166,6 +147,61 @@ ensure_winget_app() {
     fi
 }
 
+ensure_sdkman() {
+    if [ "${SDKMAN_READY:-0}" = "1" ]; then
+        return 0
+    fi
+
+    if [ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]; then
+        . "$SDKMAN_DIR/bin/sdkman-init.sh"
+        SDKMAN_READY=1
+        return 0
+    fi
+
+    if curl -fsSL "https://get.sdkman.io" | bash 2>/dev/null; then
+        . "$SDKMAN_DIR/bin/sdkman-init.sh"
+        SDKMAN_READY=1
+        return 0
+    fi
+
+    warn "SDKMAN installation failed."
+    return 1
+}
+
+install_with_sdkman() {
+    local candidate="$1"
+    local version="$2"
+
+    if ! command -v sdk >/dev/null 2>&1; then
+        warn "SDKMAN is not available; skipping $candidate $version."
+        return 1
+    fi
+
+    sdk install "$candidate" "$version" || sdk install "$candidate" "$version"
+}
+
+install_starship() {
+    if command -v starship >/dev/null 2>&1; then
+        log "Starship already installed."
+        return 0
+    fi
+
+    if apt_install starship 2>/dev/null; then
+        if command -v starship >/dev/null 2>&1; then
+            log "Starship installed via apt."
+            return 0
+        fi
+    fi
+
+    if curl -fsSL https://starship.rs/install.sh | sh -s -- -y; then
+        log "Starship installed via official script."
+        return 0
+    fi
+
+    warn "Starship installation failed."
+    return 1
+}
+
 # --- 3. OS Check ---
 if [ ! -f /etc/debian_version ]; then
     echo "Error: This bootstrap script is tailored for Debian/Ubuntu."
@@ -178,40 +214,33 @@ sudo apt update
 sudo apt upgrade -y
 sudo apt autoremove -y
 
-# --- 5. Core Packages ---
-section "Installing base packages"
+# --- 5. System layer (apt) ---
+section "Installing system packages (apt layer)"
 apt_install \
-    openjdk-17-jdk openjdk-21-jdk maven \
-    zsh build-essential btop curl file git duf eza fzf \
-    yadm bat direnv wget yamllint \
-    libsecret-1-dev lsb-release \
-    ca-certificates gnupg snapd
+    zsh build-essential btop curl file git wget lsb-release \
+    libsecret-1-dev ca-certificates gnupg
 
-# --- 6. Node.js (NVM-first) ---
-# --- 6. Node.js (NVM-first) ---
+# --- 6. Modern shell layer ---
+section "Installing modern shell tools"
+apt_install fzf yadm direnv
+install_starship || true
+
+# --- 7. Java & build layer (SDKMAN!) ---
+section "Installing Java and Maven via SDKMAN"
+if ensure_sdkman; then
+    install_with_sdkman java "21-tem" && sdk default java 21-tem || true
+    install_with_sdkman java "17-tem" || true
+    install_with_sdkman maven "latest" || true
+    maybe_configure_java
+else
+    echo "Warning: SDKMAN not available; skipping Java/Maven installs."
+fi
+
+# --- 8. Node.js (NVM-first) ---
 section "Installing Node.js via NVM"
 install_nvm && ensure_node_via_nvm 22 || apt_node_fallback
 
-# --- 7. Java alternatives ---
-maybe_configure_java
-
-# --- 8. Optional packages (apt) ---
-section "Installing optional packages (apt)"
-optional_pkgs=(gh glab kubectl kubectx starship zoxide)
-apt_optional_install "${optional_pkgs[@]}"
-install_dust
-
-# --- 9. Snap fallbacks ---
-section "Installing snap fallbacks"
-ensure_snap gh gh
-ensure_snap glab glab
-ensure_snap kubectl kubectl --classic
-ensure_snap kubectx kubectx
-ensure_snap starship starship
-ensure_snap zoxide zoxide
-ensure_snap dust dust || ensure_snap du-dust dust
-
-# --- 10. Tool-specific scripts ---
+# --- 9. Tool-specific scripts ---
 section "Running local setup scripts"
 required_scripts=(
     "$HOME/.local/bin/minconda_install.sh:Miniconda install"
@@ -237,7 +266,7 @@ for entry in "${optional_scripts[@]}"; do
     maybe_run "$path" "$label"
 done
 
-# --- 11. Windows interop (WSL) ---
+# --- 10. Windows interop (WSL) ---
 if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
     section "WSL: checking Windows installs via winget"
 
@@ -265,7 +294,7 @@ if [ -d "/mnt/c/Windows" ] || command -v cmd.exe >/dev/null 2>&1; then
     fi
 fi
 
-# --- 12. Final configs & shell ---
+# --- 11. Final configs & shell ---
 section "Final configuration"
 git config --global core.excludesfile "$HOME/.config/git/ignore" || echo "Warning: Failed to set git config."
 
@@ -290,8 +319,4 @@ fi
 echo "--------------------------------------------------"
 echo "Bootstrap complete!"
 echo "Please RESTART your terminal (or log out and back in) to use ZSH."
-echo ""
-echo "WSL Ubuntu 24.x Note:"
-echo "If you want to use snap packages, ensure systemd is enabled in WSL:"
-echo "  Add 'systemd=true' to /etc/wsl.conf and restart WSL"
 echo "--------------------------------------------------"
