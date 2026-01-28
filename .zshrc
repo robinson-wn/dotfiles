@@ -77,7 +77,3 @@ if (( $+commands[python] )); then
     export PYSPARK_PYTHON=$(command -v python)
     export PYSPARK_DRIVER_PYTHON=$(command -v python)
 fi
-
-#THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
-export SDKMAN_DIR="/home/wnr/.sdkman"
-[[ -s "/home/wnr/.sdkman/bin/sdkman-init.sh" ]] && source "/home/wnr/.sdkman/bin/sdkman-init.sh"
