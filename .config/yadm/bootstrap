@@ -254,6 +254,7 @@ optional_scripts=(
     "$HOME/.local/bin/ollama_install.sh:Ollama"
     "$HOME/.local/bin/spark_install.sh:Spark"
     "$HOME/.local/bin/gcloud_install_init.sh:Google Cloud SDK"
+    "$HOME/.local/bin/dotnet_sdk_install.sh:.NET SDK (minimal)"
 )
 
 # Add Windows PowerShell scripts if in WSL/Windows environment
